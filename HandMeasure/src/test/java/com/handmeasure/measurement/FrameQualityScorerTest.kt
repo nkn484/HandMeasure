@@ -10,11 +10,14 @@ class FrameQualityScorerTest {
         val result =
             scorer.score(
                 FrameQualityInput(
-                    handScore = 0.9f,
-                    landmarkScore = 0.9f,
+                    handDetectionScore = 0.9f,
+                    handLandmarkScore = 0.9f,
                     ringZoneScore = 0.8f,
-                    cardScore = 0.2f,
-                    blurScore = 0.8f,
+                    cardDetectionScore = 0.2f,
+                    cardRectangularityScore = 0.4f,
+                    cardEdgeSupportScore = 0.3f,
+                    blurScoreGlobal = 0.8f,
+                    blurScoreFingerRoi = 0.8f,
                     motionScore = 0.8f,
                     lightingScore = 0.8f,
                     poseScore = 0.3f,
@@ -23,7 +26,7 @@ class FrameQualityScorerTest {
             )
 
         assertThat(result.totalScore).isLessThan(0.7f)
-        assertThat(result.warnings).contains("card_weak")
-        assertThat(result.warnings).contains("pose_weak")
+        assertThat(result.confidencePenaltyReasons).contains("card_detection_low")
+        assertThat(result.confidencePenaltyReasons).contains("pose_low")
     }
 }

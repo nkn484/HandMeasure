@@ -20,6 +20,9 @@ data class HandDetection(
     val worldLandmarks: List<Landmark3D>,
     val handedness: String,
     val confidence: Float,
+    val detectionConfidence: Float = confidence,
+    val presenceConfidence: Float = confidence,
+    val trackingConfidence: Float = confidence,
 ) {
     fun fingerJointPair(targetFinger: TargetFinger): Pair<Landmark2D, Landmark2D>? {
         val (mcpIndex, pipIndex) =
@@ -41,4 +44,10 @@ data class CardDetection(
     val contourAreaScore: Float,
     val aspectScore: Float,
     val confidence: Float,
+    val coverageRatio: Float = 0f,
+    val aspectResidual: Float = 1f,
+    val rectangularityScore: Float = contourAreaScore,
+    val edgeSupportScore: Float = 0f,
+    val rectificationConfidence: Float = 0f,
+    val perspectiveDistortion: Float = 0f,
 )

@@ -12,6 +12,32 @@
 - v1 does not implement automatic timeout
 - v1 uses a guided 5-step capture flow and always returns a result once the full sequence is completed
 
+## Recent improvements (current revision)
+
+- Confidence plumbing now keeps raw MediaPipe hand confidence (removed artificial confidence floor).
+- Frame quality now returns structured subscores and explicit penalty reasons:
+  - detection confidence
+  - pose confidence
+  - measurement confidence
+  - total frame score
+- Blur/motion/lighting scoring is upgraded:
+  - blur via Laplacian variance (global + finger ROI)
+  - motion via frame-to-frame ROI luma difference
+  - lighting via mean exposure + clipping checks
+- Card detector now exposes diagnostics:
+  - coverage ratio
+  - aspect residual
+  - rectangularity score
+  - edge support score
+  - rectification confidence
+- Finger width measurement is now band-based with adaptive ROI and robust outlier rejection.
+- Multi-view thickness fusion now uses weighted robust aggregation with left/right + up/down consistency penalties.
+- Pose guidance is smoothed with hysteresis and user-facing hints.
+- Debug overlay mapping now uses actual frame dimensions (no hard-coded `1280` scaling).
+- Optional replay/debug modes were added:
+  - `debugReplayInputPath` for deterministic flow replay
+  - `debugExportEnabled` for per-session JSON + annotated frame export
+
 ## Modules
 
 - `:HandMeasure`: reusable Android library module
@@ -114,6 +140,11 @@ Warnings may include:
 - `HIGH_MOTION`
 - `THICKNESS_ESTIMATED_FROM_WEAK_ANGLES`
 
+Confidence model:
+- per-frame `detection`, `pose`, `measurement` confidences
+- final fused confidence from multi-step fusion diagnostics
+- low-confidence sessions still return best-effort output (no null final result)
+
 ## Tuning knobs
 
 Key knobs live in `HandMeasureConfig` and `QualityThresholds`:
@@ -125,6 +156,8 @@ Key knobs live in `HandMeasureConfig` and `QualityThresholds`:
 - `blurMinScore`
 - `motionMinScore`
 - `lightingMinScore`
+- `debugExportEnabled`
+- `debugReplayInputPath`
 
 ## MediaPipe model
 
@@ -136,11 +169,11 @@ Current bundled source:
 
 ## Known limitations
 
-- Card detection is robust to rounded corners, but still sensitive to heavy glare or extremely cluttered backgrounds.
-- Thickness estimation from oblique/tilt frames is heuristic in v1.
-- Debug overlay uses live detections and is intended for tuning, not pixel-perfect annotation export.
-- Guidance uses synchronous background analysis with throttling rather than a full async live-stream graph.
-- Result quality depends heavily on the card being near the target finger and inside the frame for all steps.
+- Card detection remains sensitive to severe glare or very weak card edges.
+- Thickness estimation is practical but still heuristic under strong perspective skew.
+- Replay mode depends on image quality of provided step files.
+- Pose classifier is lightweight and can degrade under extreme hand articulation.
+- Final accuracy is still constrained by card/hand coplanarity and capture stability.
 
 ## Build
 
@@ -165,3 +198,29 @@ Unit tests cover:
 - ring size mapping
 - frame quality scoring
 - pose classification helpers
+- fusion robustness checks
+
+Instrumented tests cover:
+- replay-path smoke test for `HandMeasureActivity`
+- replay runner JSON report generation
+
+## Replay harness
+
+Input folder example:
+- `front_palm.jpg`
+- `left_oblique.jpg`
+- `right_oblique.jpg`
+- `up_tilt.jpg`
+- `down_tilt.jpg`
+- optional `ground_truth.json` with `diameterMm`
+
+Programmatic usage:
+
+```kotlin
+val runner = MeasurementReplayRunner { cfg ->
+    HandMeasureCoordinator(cfg, MediaPipeHandLandmarkEngine(context))
+}
+val output = runner.runFromDirectory(HandMeasureConfig(), File("/sdcard/HandMeasureReplay"))
+```
+
+For full protocol and metrics, see `VALIDATION_PLAN.md`.

@@ -28,4 +28,27 @@ class PoseClassifierTest {
 
         assertThat(score).isGreaterThan(0.6f)
     }
+
+    @Test
+    fun evaluate_returnsGuidanceForWrongPose() {
+        val hand =
+            HandDetection(
+                imageLandmarks = List(21) { Landmark2D(0f, 0f) },
+                worldLandmarks =
+                    List(21) { index ->
+                        when (index) {
+                            0 -> Landmark3D(0f, 0f, 0f)
+                            5 -> Landmark3D(1f, 0f, 0f)
+                            17 -> Landmark3D(0f, 1f, 0f)
+                            else -> Landmark3D(0f, 0f, 0f)
+                        }
+                    },
+                handedness = "Left",
+                confidence = 0.8f,
+            )
+        val evaluation = classifier.evaluate(CaptureStep.LEFT_OBLIQUE, hand)
+
+        assertThat(evaluation.smoothedScore).isLessThan(0.5f)
+        assertThat(evaluation.guidanceHint).isNotEmpty()
+    }
 }

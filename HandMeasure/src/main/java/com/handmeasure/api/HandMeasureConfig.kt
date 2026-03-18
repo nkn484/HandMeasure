@@ -7,6 +7,8 @@ import kotlinx.parcelize.Parcelize
 data class HandMeasureConfig(
     val targetFinger: TargetFinger = TargetFinger.RING,
     val debugOverlayEnabled: Boolean = false,
+    val debugExportEnabled: Boolean = false,
+    val debugReplayInputPath: String? = null,
     val qualityThresholds: QualityThresholds = QualityThresholds(),
     val ringSizeTable: RingSizeTable = RingSizeTable.sampleUsLike(),
     val lensFacing: LensFacing = LensFacing.BACK,

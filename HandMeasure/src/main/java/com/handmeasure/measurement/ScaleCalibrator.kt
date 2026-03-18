@@ -1,5 +1,7 @@
 package com.handmeasure.measurement
 
+import com.handmeasure.vision.CardDetection
+
 data class CardRectangle(
     val centerX: Double,
     val centerY: Double,
@@ -28,4 +30,6 @@ class ScaleCalibrator(
             mmPerPxY = cardHeightMm / rectHeightPx,
         )
     }
+
+    fun calibrate(cardDetection: CardDetection): MetricScale = calibrate(cardDetection.rectangle)
 }

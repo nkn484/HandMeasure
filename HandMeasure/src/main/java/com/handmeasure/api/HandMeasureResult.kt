@@ -33,6 +33,48 @@ data class DebugMetadata(
     val frontalWidthPx: Double,
     val thicknessSamplesMm: List<Double>,
     val rawNotes: List<String>,
+    val sessionDiagnostics: SessionDiagnostics? = null,
+) : Parcelable
+
+@Parcelize
+data class SessionDiagnostics(
+    val stepDiagnostics: List<StepDiagnostics>,
+    val fusedDiagnostics: FusedDiagnostics,
+) : Parcelable
+
+@Parcelize
+data class StepDiagnostics(
+    val step: CaptureStep,
+    val handScore: Float,
+    val cardScore: Float,
+    val poseScore: Float,
+    val blurScore: Float,
+    val motionScore: Float,
+    val lightingScore: Float,
+    val cardCoverageRatio: Float,
+    val cardAspectResidual: Float,
+    val cardRectangularityScore: Float,
+    val cardEdgeSupportScore: Float,
+    val cardRectificationConfidence: Float,
+    val scaleMmPerPxX: Double,
+    val scaleMmPerPxY: Double,
+    val widthSamplesMm: List<Double>,
+    val widthVarianceMm: Double,
+    val accepted: Boolean,
+    val rejectedReason: String?,
+    val confidencePenaltyReasons: List<String>,
+) : Parcelable
+
+@Parcelize
+data class FusedDiagnostics(
+    val widthMm: Double,
+    val thicknessMm: Double,
+    val circumferenceMm: Double,
+    val equivalentDiameterMm: Double,
+    val suggestedRingSizeLabel: String,
+    val finalConfidence: Float,
+    val warningReasons: List<String>,
+    val perStepResidualsMm: List<Double>,
 ) : Parcelable
 
 @Parcelize

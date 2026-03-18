@@ -58,10 +58,12 @@ import com.handmeasure.coordinator.HandMeasureCoordinator
 import com.handmeasure.coordinator.LiveAnalysisState
 import com.handmeasure.flow.CaptureUiState
 import com.handmeasure.flow.GuidedSteps
+import com.handmeasure.measurement.MeasurementReplayRunner
 import com.handmeasure.vision.MediaPipeHandLandmarkEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 class HandMeasureActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -109,7 +111,14 @@ private fun HandMeasureRoute(
     val coroutineScope = rememberCoroutineScope()
     val previewView = remember { PreviewView(context).apply { scaleType = PreviewView.ScaleType.FIT_CENTER } }
     val cameraController = remember { CameraController(context) }
-    val coordinator = remember(config) { HandMeasureCoordinator(config, MediaPipeHandLandmarkEngine(context)) }
+    val coordinator =
+        remember(config) {
+            HandMeasureCoordinator(
+                config = config,
+                handLandmarkEngine = MediaPipeHandLandmarkEngine(context),
+                debugExportDirProvider = { File(context.filesDir, "handmeasure_debug") },
+            )
+        }
 
     var hasPermission by remember { mutableStateOf(false) }
     var phase by remember { mutableStateOf(FlowPhase.CAPTURE) }
@@ -124,6 +133,26 @@ private fun HandMeasureRoute(
         }
 
     LaunchedEffect(Unit) {
+        if (config.debugReplayInputPath != null) {
+            phase = FlowPhase.PROCESSING
+            val replayPath = config.debugReplayInputPath
+            val replayResult =
+                withContext(Dispatchers.Default) {
+                    runCatching {
+                        val runner = MeasurementReplayRunner { replayConfig ->
+                            HandMeasureCoordinator(
+                                config = replayConfig,
+                                handLandmarkEngine = MediaPipeHandLandmarkEngine(context),
+                                debugExportDirProvider = { File(context.filesDir, "handmeasure_debug") },
+                            )
+                        }
+                        runner.runFromDirectory(config.copy(debugReplayInputPath = null), File(replayPath))
+                    }.getOrNull()
+                }
+            result = replayResult?.result
+            phase = FlowPhase.RESULT
+            return@LaunchedEffect
+        }
         hasPermission =
             ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
         if (!hasPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
@@ -247,11 +276,13 @@ private fun GuidanceOverlay(
         )
 
         if (debugEnabled) {
+            val frameWidth = (analysisState?.frameWidth ?: 1).coerceAtLeast(1)
+            val frameHeight = (analysisState?.frameHeight ?: 1).coerceAtLeast(1)
             analysisState?.handDetection?.imageLandmarks?.forEach { landmark ->
                 drawCircle(
                     color = Color(0xFF4DD0E1),
                     radius = 6f,
-                    center = Offset(landmark.x / 1280f * size.width, landmark.y / 1280f * size.height),
+                    center = Offset(landmark.x / frameWidth * size.width, landmark.y / frameHeight * size.height),
                 )
             }
             val corners = analysisState?.cardDetection?.corners.orEmpty()
@@ -261,8 +292,8 @@ private fun GuidanceOverlay(
                     val end = corners[(index + 1) % corners.size]
                     drawLine(
                         color = Color(0xFFFFC107),
-                        start = Offset(start.first / 1280f * size.width, start.second / 1280f * size.height),
-                        end = Offset(end.first / 1280f * size.width, end.second / 1280f * size.height),
+                        start = Offset(start.first / frameWidth * size.width, start.second / frameHeight * size.height),
+                        end = Offset(end.first / frameWidth * size.width, end.second / frameHeight * size.height),
                         strokeWidth = 5f,
                     )
                 }
@@ -303,10 +334,13 @@ private fun StatusPanel(
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text =
-                    "quality=${state.qualityScore.format2()} hand=${state.handScore.format2()} card=${state.cardScore.format2()} pose=${state.poseScore.format2()} blur=${state.blurScore.format2()} motion=${state.motionScore.format2()} light=${state.lightingScore.format2()}",
+                    "quality=${state.qualityScore.format2()} detect=${state.detectionConfidence.format2()} pose=${state.poseConfidence.format2()} measure=${state.measurementConfidence.format2()} card=${state.cardScore.format2()} blur=${state.blurScore.format2()} motion=${state.motionScore.format2()} light=${state.lightingScore.format2()}",
                 color = Color(0xFFE0E0E0),
                 style = MaterialTheme.typography.bodySmall,
             )
+            state.poseGuidanceHint?.let {
+                Text(text = "Hint: $it", color = Color(0xFFFFE082), style = MaterialTheme.typography.bodySmall)
+            }
         }
     }
 }

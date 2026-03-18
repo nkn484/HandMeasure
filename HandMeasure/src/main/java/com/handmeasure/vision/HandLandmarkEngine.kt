@@ -7,7 +7,6 @@ import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker.HandLandmarkerOptions
-import kotlin.math.max
 
 interface HandLandmarkEngine {
     fun detect(bitmap: Bitmap): HandDetection?
@@ -47,7 +46,10 @@ class MediaPipeHandLandmarkEngine(
                         )
                     },
                 handedness = handedness,
-                confidence = max(handScore, 0.7f).coerceIn(0f, 1f),
+                confidence = handScore.coerceIn(0f, 1f),
+                detectionConfidence = handScore.coerceIn(0f, 1f),
+                presenceConfidence = if (image.size >= 21) 1f else (image.size / 21f).coerceIn(0f, 1f),
+                trackingConfidence = handScore.coerceIn(0f, 1f),
             )
         } catch (error: Throwable) {
             Log.w("HandLandmarkEngine", "MediaPipe detection failed: ${error.message}")

@@ -10,6 +10,10 @@ data class StepCandidate(
     val poseScore: Float,
     val cardScore: Float,
     val handScore: Float,
+    val blurScore: Float = 0f,
+    val motionScore: Float = 0f,
+    val lightingScore: Float = 0f,
+    val confidencePenaltyReasons: List<String> = emptyList(),
 )
 
 data class CaptureUiState(
