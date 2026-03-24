@@ -49,6 +49,6 @@ class PoseClassifierTest {
         val evaluation = classifier.evaluate(CaptureStep.LEFT_OBLIQUE, hand)
 
         assertThat(evaluation.smoothedScore).isLessThan(0.5f)
-        assertThat(evaluation.guidanceHint).isNotEmpty()
+        assertThat(evaluation.guidanceAction).isNotNull()
     }
 }

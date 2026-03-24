@@ -1,6 +1,41 @@
+import io.gitlab.arturbosch.detekt.Detekt
+import io.gitlab.arturbosch.detekt.extensions.DetektExtension
+import org.jlleitschuh.gradle.ktlint.KtlintExtension
+
 plugins {
     id("com.android.application") version "8.7.3" apply false
     id("com.android.library") version "8.7.3" apply false
     id("org.jetbrains.kotlin.android") version "2.0.21" apply false
     id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false
+    id("io.gitlab.arturbosch.detekt") version "1.23.8" apply false
+    id("org.jlleitschuh.gradle.ktlint") version "12.1.2" apply false
+}
+
+subprojects {
+    plugins.withId("org.jetbrains.kotlin.android") {
+        apply(plugin = "io.gitlab.arturbosch.detekt")
+        apply(plugin = "org.jlleitschuh.gradle.ktlint")
+
+        extensions.configure<DetektExtension> {
+            buildUponDefaultConfig = true
+            allRules = false
+            parallel = true
+            config.setFrom(files("$rootDir/detekt-relaxed.yml"))
+        }
+
+        tasks.withType<Detekt>().configureEach {
+            jvmTarget = "17"
+        }
+
+        extensions.configure<KtlintExtension> {
+            android.set(true)
+            ignoreFailures.set(false)
+            outputToConsole.set(true)
+            baseline.set(file("$projectDir/ktlint-baseline.xml"))
+            filter {
+                exclude("**/generated/**")
+                exclude("**/build/**")
+            }
+        }
+    }
 }

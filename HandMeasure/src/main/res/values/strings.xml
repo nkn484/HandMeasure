@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="step_front_palm_title">Front palm</string>
+    <string name="step_left_oblique_title">Left oblique</string>
+    <string name="step_right_oblique_title">Right oblique</string>
+    <string name="step_up_tilt_title">Up tilt</string>
+    <string name="step_down_tilt_title">Down tilt</string>
+
+    <string name="step_front_palm_hint">Place your palm toward the camera and keep the card near the ring finger.</string>
+    <string name="step_left_oblique_hint">Rotate your hand slightly left while keeping the ring finger visible.</string>
+    <string name="step_right_oblique_hint">Rotate your hand slightly right and keep the card in frame.</string>
+    <string name="step_up_tilt_hint">Tilt your hand upward to reveal finger thickness.</string>
+    <string name="step_down_tilt_hint">Tilt your hand downward for the final angle.</string>
+
+    <string name="pose_hint_place_hand_in_frame">Place your hand in frame.</string>
+    <string name="pose_hint_place_card_near_finger">Place the card near your finger.</string>
+    <string name="pose_hint_adjust_hand_pose">Adjust hand pose.</string>
+    <string name="pose_hint_hold_hand_steady">Hold your hand steady.</string>
+    <string name="pose_hint_frame_hand_clearer">Move hand into frame more clearly.</string>
+    <string name="pose_hint_rotate_left_more">Rotate hand more to the left.</string>
+    <string name="pose_hint_rotate_right_more">Rotate hand more to the right.</string>
+    <string name="pose_hint_tilt_up_more">Tilt hand upward more.</string>
+    <string name="pose_hint_tilt_down_more">Tilt hand downward more.</string>
+    <string name="pose_hint_face_palm_to_camera">Face your palm directly to the camera.</string>
+</resources>

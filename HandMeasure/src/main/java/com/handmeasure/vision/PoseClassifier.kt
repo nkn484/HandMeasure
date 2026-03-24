@@ -10,11 +10,21 @@ enum class PoseMatchLevel {
     WRONG,
 }
 
+enum class PoseGuidanceAction {
+    FRAME_HAND_CLEARER,
+    ROTATE_LEFT_MORE,
+    ROTATE_RIGHT_MORE,
+    TILT_UP_MORE,
+    TILT_DOWN_MORE,
+    FACE_PALM_TO_CAMERA,
+    HOLD_STEADY,
+}
+
 data class PoseEvaluation(
     val rawScore: Float,
     val smoothedScore: Float,
     val level: PoseMatchLevel,
-    val guidanceHint: String?,
+    val guidanceAction: PoseGuidanceAction?,
 )
 
 data class PoseSnapshot(
@@ -65,7 +75,7 @@ class PoseClassifier {
             rawScore = rawScore,
             smoothedScore = smoothed,
             level = level,
-            guidanceHint = buildGuidanceHint(step, snapshot, level),
+            guidanceAction = buildGuidanceAction(step, snapshot, level),
         )
     }
 
@@ -110,21 +120,25 @@ class PoseClassifier {
         return lastStableScore
     }
 
-    private fun buildGuidanceHint(
+    private fun buildGuidanceAction(
         step: CaptureStep,
         snapshot: PoseSnapshot?,
         level: PoseMatchLevel,
-    ): String? {
+    ): PoseGuidanceAction? {
         if (level == PoseMatchLevel.CORRECT) return null
-        if (snapshot == null) return "Đưa bàn tay vào khung rõ hơn"
+        if (snapshot == null) return PoseGuidanceAction.FRAME_HAND_CLEARER
         val nx = snapshot.normalX
         val ny = snapshot.normalY
         return when (step) {
-            CaptureStep.LEFT_OBLIQUE -> if (nx > -0.35f) "Xoay tay sang trái thêm" else "Giữ tay ổn định"
-            CaptureStep.RIGHT_OBLIQUE -> if (nx < 0.35f) "Xoay tay sang phải thêm" else "Giữ tay ổn định"
-            CaptureStep.UP_TILT -> if (ny > -0.35f) "Nghiêng tay lên thêm" else "Giữ tay ổn định"
-            CaptureStep.DOWN_TILT -> if (ny < 0.35f) "Nghiêng tay xuống thêm" else "Giữ tay ổn định"
-            CaptureStep.FRONT_PALM -> "Hướng lòng bàn tay trực diện camera"
+            CaptureStep.LEFT_OBLIQUE ->
+                if (nx > -0.35f) PoseGuidanceAction.ROTATE_LEFT_MORE else PoseGuidanceAction.HOLD_STEADY
+            CaptureStep.RIGHT_OBLIQUE ->
+                if (nx < 0.35f) PoseGuidanceAction.ROTATE_RIGHT_MORE else PoseGuidanceAction.HOLD_STEADY
+            CaptureStep.UP_TILT ->
+                if (ny > -0.35f) PoseGuidanceAction.TILT_UP_MORE else PoseGuidanceAction.HOLD_STEADY
+            CaptureStep.DOWN_TILT ->
+                if (ny < 0.35f) PoseGuidanceAction.TILT_DOWN_MORE else PoseGuidanceAction.HOLD_STEADY
+            CaptureStep.FRONT_PALM -> PoseGuidanceAction.FACE_PALM_TO_CAMERA
         }
     }
 }

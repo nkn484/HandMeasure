@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="build.gradle.kts">
+        <error line="36" column="1" source="standard:no-blank-line-before-rbrace" />
+    </file>
+    <file name="src/main/java/com/handmeasure/sample/MainActivity.kt">
+        <error line="51" column="1" source="standard:max-line-length" />
+        <error line="51" column="106" source="standard:argument-list-wrapping" />
+        <error line="51" column="135" source="standard:argument-list-wrapping" />
+        <error line="51" column="170" source="standard:argument-list-wrapping" />
+        <error line="51" column="194" source="standard:argument-list-wrapping" />
+    </file>
+</baseline>

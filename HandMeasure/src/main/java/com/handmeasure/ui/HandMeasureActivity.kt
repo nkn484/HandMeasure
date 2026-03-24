@@ -47,9 +47,12 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import com.handmeasure.R
+import com.handmeasure.api.CaptureStep
 import com.handmeasure.api.HandMeasureConfig
 import com.handmeasure.api.HandMeasureResult
 import com.handmeasure.api.CalibrationStatus
@@ -60,6 +63,8 @@ import com.handmeasure.camera.CameraController
 import com.handmeasure.camera.HandMeasureAnalyzer
 import com.handmeasure.coordinator.HandMeasureCoordinator
 import com.handmeasure.coordinator.LiveAnalysisState
+import com.handmeasure.coordinator.PoseGuidanceHintKey
+import com.handmeasure.coordinator.PoseGuidanceHintTextResolver
 import com.handmeasure.flow.CaptureUiState
 import com.handmeasure.flow.GuidedSteps
 import com.handmeasure.measurement.MeasurementReplayRunner
@@ -116,12 +121,17 @@ private fun HandMeasureRoute(
     val previewView = remember { PreviewView(context).apply { scaleType = PreviewView.ScaleType.FIT_CENTER } }
     val cameraController = remember { CameraController(context) }
     val handLandmarkEngine = remember(config) { MediaPipeHandLandmarkEngine(context) }
+    val poseHintResolver =
+        remember(context) {
+            PoseGuidanceHintTextResolver { hintKey -> context.getString(hintKey.toResId()) }
+        }
     val coordinator =
         remember(config) {
             HandMeasureCoordinator(
                 config = config,
                 handLandmarkEngine = handLandmarkEngine,
                 debugExportDirProvider = { File(context.filesDir, "handmeasure_debug") },
+                poseGuidanceHintTextResolver = poseHintResolver,
             )
         }
 
@@ -150,6 +160,7 @@ private fun HandMeasureRoute(
                                 config = replayConfig,
                                 handLandmarkEngine = replayEngine,
                                 debugExportDirProvider = { File(context.filesDir, "handmeasure_debug") },
+                                poseGuidanceHintTextResolver = poseHintResolver,
                             )
                         }
                         try {
@@ -333,6 +344,7 @@ private fun StatusPanel(
     analysisState: LiveAnalysisState?,
     onClose: () -> Unit,
 ) {
+    val step = captureState.currentStep.step
     Column(
         modifier =
             Modifier.fillMaxWidth()
@@ -341,8 +353,8 @@ private fun StatusPanel(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = captureState.currentStep.title, color = Color.White, style = MaterialTheme.typography.titleLarge)
-                Text(text = captureState.currentStep.hint, color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                Text(text = stringResource(id = step.titleResId()), color = Color.White, style = MaterialTheme.typography.titleLarge)
+                Text(text = stringResource(id = step.hintResId()), color = Color.White, style = MaterialTheme.typography.bodyMedium)
             }
             Spacer(modifier = Modifier.width(12.dp))
             Button(onClick = onClose) { Text("Close") }
@@ -426,3 +438,35 @@ private fun ResultScreen(result: HandMeasureResult?, onDone: () -> Unit) {
 private fun Float.format2(): String = "%.2f".format(this)
 
 private fun Double.format2(): String = "%.2f".format(this)
+
+private fun CaptureStep.titleResId(): Int =
+    when (this) {
+        CaptureStep.FRONT_PALM -> R.string.step_front_palm_title
+        CaptureStep.LEFT_OBLIQUE -> R.string.step_left_oblique_title
+        CaptureStep.RIGHT_OBLIQUE -> R.string.step_right_oblique_title
+        CaptureStep.UP_TILT -> R.string.step_up_tilt_title
+        CaptureStep.DOWN_TILT -> R.string.step_down_tilt_title
+    }
+
+private fun CaptureStep.hintResId(): Int =
+    when (this) {
+        CaptureStep.FRONT_PALM -> R.string.step_front_palm_hint
+        CaptureStep.LEFT_OBLIQUE -> R.string.step_left_oblique_hint
+        CaptureStep.RIGHT_OBLIQUE -> R.string.step_right_oblique_hint
+        CaptureStep.UP_TILT -> R.string.step_up_tilt_hint
+        CaptureStep.DOWN_TILT -> R.string.step_down_tilt_hint
+    }
+
+private fun PoseGuidanceHintKey.toResId(): Int =
+    when (this) {
+        PoseGuidanceHintKey.PLACE_HAND_IN_FRAME -> R.string.pose_hint_place_hand_in_frame
+        PoseGuidanceHintKey.PLACE_CARD_NEAR_FINGER -> R.string.pose_hint_place_card_near_finger
+        PoseGuidanceHintKey.ADJUST_HAND_POSE -> R.string.pose_hint_adjust_hand_pose
+        PoseGuidanceHintKey.HOLD_HAND_STEADY -> R.string.pose_hint_hold_hand_steady
+        PoseGuidanceHintKey.FRAME_HAND_CLEARER -> R.string.pose_hint_frame_hand_clearer
+        PoseGuidanceHintKey.ROTATE_LEFT_MORE -> R.string.pose_hint_rotate_left_more
+        PoseGuidanceHintKey.ROTATE_RIGHT_MORE -> R.string.pose_hint_rotate_right_more
+        PoseGuidanceHintKey.TILT_UP_MORE -> R.string.pose_hint_tilt_up_more
+        PoseGuidanceHintKey.TILT_DOWN_MORE -> R.string.pose_hint_tilt_down_more
+        PoseGuidanceHintKey.FACE_PALM_TO_CAMERA -> R.string.pose_hint_face_palm_to_camera
+    }
