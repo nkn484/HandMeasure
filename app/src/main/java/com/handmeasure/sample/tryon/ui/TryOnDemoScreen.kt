@@ -374,7 +374,7 @@ private fun upsertSnapshot(
     existing: Bitmap?,
     source: Bitmap,
 ): Bitmap {
-    if (existing != null && existing.width == source.width && existing.height == source.height && existing.isMutable) {
+    if (isReusableSnapshot(existing, source)) {
         val canvas = android.graphics.Canvas(existing)
         canvas.drawBitmap(source, 0f, 0f, null)
         return existing
@@ -382,6 +382,11 @@ private fun upsertSnapshot(
     existing?.recycle()
     return source.copy(Bitmap.Config.ARGB_8888, true)
 }
+
+private fun isReusableSnapshot(
+    existing: Bitmap?,
+    source: Bitmap,
+): Boolean = existing != null && existing.width == source.width && existing.height == source.height && existing.isMutable
 
 private class MutableHandPoseProvider : HandPoseProvider {
     var snapshot: HandPoseSnapshot? = null

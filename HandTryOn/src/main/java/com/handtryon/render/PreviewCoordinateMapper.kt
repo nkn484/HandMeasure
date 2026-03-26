@@ -16,7 +16,7 @@ object PreviewCoordinateMapper {
         viewportWidth: Int,
         viewportHeight: Int,
     ): FrameToViewportTransform {
-        if (frameWidth <= 0 || frameHeight <= 0 || viewportWidth <= 0 || viewportHeight <= 0) {
+        if (!allDimensionsPositive(frameWidth, frameHeight, viewportWidth, viewportHeight)) {
             return FrameToViewportTransform(scale = 1f, offsetX = 0f, offsetY = 0f)
         }
         val scale = minOf(viewportWidth / frameWidth.toFloat(), viewportHeight / frameHeight.toFloat())
@@ -47,4 +47,11 @@ object PreviewCoordinateMapper {
         val divisor = transform.scale.takeIf { it > 0f } ?: 1f
         return Offset(deltaX / divisor, deltaY / divisor)
     }
+
+    private fun allDimensionsPositive(
+        frameWidth: Int,
+        frameHeight: Int,
+        viewportWidth: Int,
+        viewportHeight: Int,
+    ): Boolean = frameWidth > 0 && frameHeight > 0 && viewportWidth > 0 && viewportHeight > 0
 }
