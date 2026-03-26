@@ -1,33 +1,60 @@
-# Try-on asset normalization (POC)
+# Try-on asset normalization v2
 
-Nguồn đầu vào hiện tại nằm ngoài repo:
+Nguồn input hiện tại (ngoài repo):
 
-- `../Thử nhẫn/assets/*.webp` (3 ảnh marketing cùng một mẫu nhẫn)
+- `../Thử nhẫn/assets/*.webp`
 
 Script normalize:
 
 - `tools/tryon/normalize_ring_asset.py`
 
-Mục tiêu của script:
+## Pipeline v2
 
-1. Chấm điểm nhanh 3 ảnh đầu vào.
-2. Chọn 1 ảnh tốt nhất làm nguồn cho POC.
-3. Tách foreground đơn giản theo màu nền + crop vùng nhẫn.
-4. Xuất asset dùng overlay.
+1. Decode `.webp` bằng OpenCV (hỗ trợ đường dẫn Unicode).
+2. Tạo foreground mask đa tín hiệu:
+   - LAB color-distance theo border background model
+   - saturation/value gating
+   - edge refinement
+3. Connected-component filtering để loại text/logo/noise ngoài vùng sản phẩm.
+4. GrabCut refinement để tách nền sạch hơn.
+5. Morphological cleanup + trim bounds.
+6. Center sản phẩm vào canvas chuẩn (`--canvas-size`, mặc định `1024`).
+7. Tính metadata phục vụ renderer:
+   - `sourceFile`
+   - `contentBounds`
+   - `visualCenter`
+   - `alphaBounds`
+   - `recommendedWidthRatio`
+   - `rotationBiasDeg`
+   - `assetQualityScore`
+   - `backgroundRemovalConfidence`
+   - `notes`
 
-Lệnh chạy từ root repo:
+## Cách chạy
 
 ```powershell
 python tools/tryon/normalize_ring_asset.py --source-dir "..\Thử nhẫn\assets" --output-dir "app\src\main\assets\tryon"
 ```
 
-Output:
+Tuỳ chọn debug mask:
 
-- `app/src/main/assets/tryon/ring_overlay_v1.png` (asset dùng để render)
-- `app/src/main/assets/tryon/ring_source_selected.webp` (ảnh nguồn được chọn)
-- `app/src/main/assets/tryon/normalization_report.json` (metadata chấm điểm)
+```powershell
+python tools/tryon/normalize_ring_asset.py --source-dir "..\Thử nhẫn\assets" --output-dir "app\src\main\assets\tryon" --write-debug
+```
 
-Giới hạn hiện tại:
+Tuỳ chọn manual correction (hybrid auto + override):
 
-- Xóa nền là heuristic đơn giản, có thể còn viền trắng hoặc mất chi tiết phản quang.
-- Nếu cần chất lượng tốt hơn, v1 cho phép thay trực tiếp `ring_overlay_v1.png` bằng bản crop/erase nền thủ công.
+```powershell
+python tools/tryon/normalize_ring_asset.py --source-dir "..\Thử nhẫn\assets" --output-dir "app\src\main\assets\tryon" --manual-config "docs\tryon-normalize-manual.json"
+```
+
+## Output v2
+
+- `app/src/main/assets/tryon/ring_overlay_v2.png`
+- `app/src/main/assets/tryon/normalization_report_v2.json`
+- `app/src/main/assets/tryon/ring_source_selected.webp`
+
+## Ghi chú chất lượng
+
+- V2 giảm phụ thuộc threshold nền trắng đơn giản như bản cũ.
+- Nếu ảnh marketing quá nhiễu hoặc phản quang mạnh, dùng `--manual-config` để override metadata tối thiểu thay vì sửa code.

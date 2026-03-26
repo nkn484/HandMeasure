@@ -1,0 +1,106 @@
+{
+  "pipelineVersion": "2.0",
+  "selected": "vn-11134207-7r98o-ltxgkqbixqn365.webp",
+  "normalizedOutput": "ring_overlay_v2.png",
+  "sourceCopy": "ring_source_selected.webp",
+  "sourceFile": "vn-11134207-7r98o-ltxgkqbixqn365.webp",
+  "contentBounds": {
+    "left": 191,
+    "top": 380,
+    "right": 798,
+    "bottom": 644
+  },
+  "visualCenter": {
+    "x": 536.89,
+    "y": 512.89
+  },
+  "alphaBounds": {
+    "left": 191,
+    "top": 380,
+    "right": 798,
+    "bottom": 644
+  },
+  "recommendedWidthRatio": 0.1781,
+  "rotationBiasDeg": 0.0,
+  "assetQualityScore": 0.7947,
+  "backgroundRemovalConfidence": 0.9936,
+  "notes": [],
+  "manualOverrideApplied": false,
+  "candidates": [
+    {
+      "filename": "vn-11134207-7r98o-ltxgkqbixqn365.webp",
+      "score": 0.8583,
+      "assetQualityScore": 0.7947,
+      "backgroundRemovalConfidence": 0.9936,
+      "recommendedWidthRatio": 0.1781,
+      "rotationBiasDeg": 0.0,
+      "visualCenter": {
+        "x": 536.89,
+        "y": 512.89
+      },
+      "contentBounds": {
+        "left": 191,
+        "top": 380,
+        "right": 798,
+        "bottom": 644
+      },
+      "alphaBounds": {
+        "left": 191,
+        "top": 380,
+        "right": 798,
+        "bottom": 644
+      },
+      "notes": []
+    },
+    {
+      "filename": "vn-11134207-7r98o-lu76hhpsbcbj78.webp",
+      "score": 0.837,
+      "assetQualityScore": 0.7662,
+      "backgroundRemovalConfidence": 0.9874,
+      "recommendedWidthRatio": 0.1425,
+      "rotationBiasDeg": 0.0,
+      "visualCenter": {
+        "x": 355.61,
+        "y": 614.41
+      },
+      "contentBounds": {
+        "left": 92,
+        "top": 250,
+        "right": 851,
+        "bottom": 754
+      },
+      "alphaBounds": {
+        "left": 92,
+        "top": 250,
+        "right": 851,
+        "bottom": 754
+      },
+      "notes": []
+    },
+    {
+      "filename": "vn-11134207-7r98o-lu4bkesich0f3d.webp",
+      "score": 0.8291,
+      "assetQualityScore": 0.7566,
+      "backgroundRemovalConfidence": 0.9833,
+      "recommendedWidthRatio": 0.1385,
+      "rotationBiasDeg": 0.0,
+      "visualCenter": {
+        "x": 561.83,
+        "y": 364.25
+      },
+      "contentBounds": {
+        "left": 122,
+        "top": 150,
+        "right": 903,
+        "bottom": 797
+      },
+      "alphaBounds": {
+        "left": 122,
+        "top": 150,
+        "right": 903,
+        "bottom": 797
+      },
+      "notes": []
+    }
+  ]
+}

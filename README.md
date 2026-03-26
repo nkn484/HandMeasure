@@ -41,7 +41,8 @@
 ## Modules
 
 - `:HandMeasure`: reusable Android library module
-- `:app`: minimal sample app showing Activity Result API integration
+- `:HandTryOn`: try-on library module (domain/core/render/realtime/validation)
+- `:app`: host demo app
 
 ## Public API
 
@@ -191,7 +192,7 @@ Windows note for Unicode paths:
 subst X: "$PWD"
 pushd X:\
 $env:GRADLE_USER_HOME="$PWD\.gradle_user_home_ascii"
-.\gradlew.bat :HandMeasure:assembleDebug :app:assembleDebug
+.\gradlew.bat :HandMeasure:assembleDebug :HandTryOn:assembleDebug :app:assembleDebug
 popd
 subst X: /D
 ```
@@ -239,6 +240,9 @@ For the refactor structure and component boundaries, see `docs/refactor-architec
 
 ## Ring try-on POC (single product)
 
-- Demo implementation: `:app` module, package `com.handmeasure.sample.tryon`
+- Core try-on implementation: `:HandTryOn`
+- Demo host wiring: `:app` module, package `com.handmeasure.sample.tryon`
+- `HandTryOn` docs: `HandTryOn/README.md`
 - POC guide: `docs/tryon-poc.md`
 - Asset normalization guide: `docs/tryon-asset-normalization.md`
+- Validation guide: `docs/tryon-validation.md`

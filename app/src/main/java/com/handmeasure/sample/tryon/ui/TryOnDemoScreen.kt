@@ -8,9 +8,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.view.PreviewView
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,37 +24,43 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.handmeasure.api.HandMeasureConfig
 import com.handmeasure.api.HandMeasureContract
 import com.handmeasure.api.HandMeasureResult
 import com.handmeasure.api.QualityThresholds
 import com.handmeasure.api.TargetFinger
 import com.handmeasure.camera.CameraController
-import com.handmeasure.sample.tryon.data.RingAssetLoader
-import com.handmeasure.sample.tryon.data.SingleRingCatalog
-import com.handmeasure.sample.tryon.domain.RingPlacement
-import com.handmeasure.sample.tryon.domain.TryOnMode
-import com.handmeasure.sample.tryon.domain.TryOnSession
-import com.handmeasure.sample.tryon.render.PreviewCoordinateMapper
-import com.handmeasure.sample.tryon.render.RingOverlayRenderer
-import com.handmeasure.sample.tryon.render.RingPlacementCalculator
 import com.handmeasure.vision.HandDetection
 import com.handmeasure.vision.MediaPipeHandLandmarkEngine
+import com.handtryon.core.HandPoseProvider
+import com.handtryon.core.OptionalMeasurementProvider
+import com.handtryon.core.TryOnSessionResolver
+import com.handtryon.data.RingAssetLoader
+import com.handtryon.domain.HandPoseSnapshot
+import com.handtryon.domain.LandmarkPoint
+import com.handtryon.domain.MeasurementSnapshot
+import com.handtryon.domain.RingAssetSource
+import com.handtryon.domain.RingPlacement
+import com.handtryon.domain.TryOnMode
+import com.handtryon.domain.TryOnSession
+import com.handtryon.realtime.TryOnRealtimeAnalyzer
+import com.handtryon.render.StableRingOverlayRenderer
+import com.handtryon.ui.TryOnOverlay
+import com.handtryon.validation.RuntimeMetrics
 import java.io.File
 import java.io.FileOutputStream
+import kotlin.math.roundToInt
 
 @Composable
 fun TryOnDemoScreen(
@@ -64,25 +68,43 @@ fun TryOnDemoScreen(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val ringProduct = remember { SingleRingCatalog.ringProduct }
-    val ringBitmap =
-        remember {
-            runCatching { RingAssetLoader(context.assets).loadOverlayBitmap(ringProduct) }.getOrNull()
-        }
-    val renderer = remember { RingOverlayRenderer() }
-    val placementCalculator = remember { RingPlacementCalculator() }
     val previewView = remember { PreviewView(context).apply { scaleType = PreviewView.ScaleType.FIT_CENTER } }
     val cameraController = remember { CameraController(context) }
     val handLandmarkEngine = remember { MediaPipeHandLandmarkEngine(context) }
+    val sessionResolver = remember { TryOnSessionResolver() }
+    val previewRenderer = remember { StableRingOverlayRenderer() }
+    val exportRenderer = remember { StableRingOverlayRenderer() }
+    val handPoseProvider = remember { MutableHandPoseProvider() }
+    val measurementProvider = remember { MutableMeasurementProvider() }
+
     var hasCameraPermission by remember { mutableStateOf(false) }
     var latestFrame by remember { mutableStateOf<Bitmap?>(null) }
-    var latestDetection by remember { mutableStateOf<HandDetection?>(null) }
-    var measurementResult by remember { mutableStateOf<HandMeasureResult?>(null) }
-    var manualPlacement by remember { mutableStateOf<RingPlacement?>(null) }
-    var overlayWidth by remember { mutableIntStateOf(0) }
-    var overlayHeight by remember { mutableIntStateOf(0) }
     var session by remember { mutableStateOf<TryOnSession?>(null) }
+    var manualPlacement by remember { mutableStateOf<RingPlacement?>(null) }
+    var manualAdjustEnabled by remember { mutableStateOf(false) }
+    var runtimeMetrics by remember { mutableStateOf<RuntimeMetrics?>(null) }
     var exportedPath by remember { mutableStateOf<String?>(null) }
+
+    val baseAsset =
+        remember {
+            RingAssetSource(
+                id = "single_ring_demo_v2",
+                name = "Demo Ring",
+                overlayAssetPath = "tryon/ring_overlay_v2.png",
+                metadataAssetPath = "tryon/normalization_report_v2.json",
+                defaultWidthRatio = 0.16f,
+            )
+        }
+    val ringAssetLoader = remember { RingAssetLoader(context.assets) }
+    val ringBitmap = remember { runCatching { ringAssetLoader.loadOverlayBitmap(baseAsset) }.getOrNull() }
+    val metadata = remember { runCatching { ringAssetLoader.loadMetadata(baseAsset) }.getOrNull() }
+    val activeAsset =
+        remember(baseAsset, metadata) {
+            baseAsset.copy(
+                defaultWidthRatio = metadata?.recommendedWidthRatio ?: baseAsset.defaultWidthRatio,
+                rotationBiasDeg = metadata?.rotationBiasDeg ?: 0f,
+            )
+        }
 
     val permissionLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -90,218 +112,207 @@ fun TryOnDemoScreen(
         }
     val measureLauncher =
         rememberLauncherForActivityResult(HandMeasureContract()) { result ->
-            measurementResult = result
+            measurementProvider.snapshot = result?.toMeasurementSnapshot()
             if (result != null) {
-                val updated =
-                    buildSession(
-                        ringProduct = ringProduct,
-                        measurementResult = result,
-                        latestDetection = latestDetection,
-                        latestFrame = latestFrame,
-                        placementCalculator = placementCalculator,
-                        manualPlacement = manualPlacement,
-                        overlayWidth = overlayWidth,
-                        overlayHeight = overlayHeight,
+                session =
+                    sessionResolver.resolve(
+                        asset = activeAsset,
+                        handPose = handPoseProvider.latestPose(),
+                        measurement = measurementProvider.latestMeasurement(),
+                        manualPlacement = if (manualAdjustEnabled) manualPlacement else null,
+                        previousSession = session,
+                        frameWidth = latestFrame?.width ?: 1080,
+                        frameHeight = latestFrame?.height ?: 1920,
                     )
-                session = updated
-                if (updated.mode != TryOnMode.Manual) manualPlacement = null
             }
         }
 
     LaunchedEffect(Unit) {
         hasCameraPermission =
             ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-        if (!hasCameraPermission) {
-            permissionLauncher.launch(Manifest.permission.CAMERA)
-        }
+        if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
     }
 
-    DisposableEffect(lifecycleOwner, hasCameraPermission, handLandmarkEngine) {
+    DisposableEffect(lifecycleOwner, hasCameraPermission, handLandmarkEngine, activeAsset) {
         if (!hasCameraPermission) {
             onDispose { }
         } else {
             val analyzer =
-                TryOnFrameAnalyzer(handLandmarkEngine = handLandmarkEngine) { frame, detection ->
-                    ContextCompat.getMainExecutor(context).execute {
-                        latestFrame?.recycle()
-                        latestFrame = frame
-                        latestDetection = detection
-                        if (session == null && ringBitmap != null) {
-                            session =
-                                buildSession(
-                                    ringProduct = ringProduct,
-                                    measurementResult = measurementResult,
-                                    latestDetection = latestDetection,
-                                    latestFrame = latestFrame,
-                                    placementCalculator = placementCalculator,
-                                    manualPlacement = manualPlacement,
-                                    overlayWidth = overlayWidth,
-                                    overlayHeight = overlayHeight,
-                                )
+                TryOnRealtimeAnalyzer(
+                    minDetectionIntervalMs = 110L,
+                    onDetectionFrame = { frame, timestampMs ->
+                        val detection = handLandmarkEngine.detect(frame)
+                        val pose = detection?.toPoseSnapshot(frame.width, frame.height, timestampMs)
+                        ContextCompat.getMainExecutor(context).execute {
+                            handPoseProvider.snapshot = pose
+                            latestFrame = upsertSnapshot(latestFrame, frame)
+                            if (!manualAdjustEnabled || session == null) {
+                                session =
+                                    sessionResolver.resolve(
+                                        asset = activeAsset,
+                                        handPose = handPoseProvider.latestPose(),
+                                        measurement = measurementProvider.latestMeasurement(),
+                                        manualPlacement = if (manualAdjustEnabled) manualPlacement else null,
+                                        previousSession = session,
+                                        frameWidth = frame.width,
+                                        frameHeight = frame.height,
+                                        nowMs = timestampMs,
+                                    )
+                                if (session?.mode != TryOnMode.Manual) {
+                                    manualPlacement = null
+                                    manualAdjustEnabled = false
+                                }
+                            }
                         }
-                    }
-                }
+                    },
+                    onMetricsUpdated = { metrics ->
+                        ContextCompat.getMainExecutor(context).execute {
+                            runtimeMetrics = metrics
+                        }
+                    },
+                )
             cameraController.bind(
                 lifecycleOwner = lifecycleOwner,
                 previewView = previewView,
                 analyzer = analyzer,
                 lensFacing = com.handmeasure.api.LensFacing.BACK,
-                onError = {
-                    Toast.makeText(context, "Camera bind failed: ${it.message}", Toast.LENGTH_SHORT).show()
+                analysisOutputImageFormat = androidx.camera.core.ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888,
+                analysisTargetResolution = android.util.Size(960, 720),
+                onError = { throwable ->
+                    Toast.makeText(context, "Camera bind failed: ${throwable.message}", Toast.LENGTH_SHORT).show()
                 },
             )
             onDispose {
+                analyzer.close()
                 cameraController.shutdown()
+                handLandmarkEngine.close()
+                previewRenderer.reset()
+                exportRenderer.reset()
                 latestFrame?.recycle()
                 latestFrame = null
+                ringBitmap?.recycle()
             }
         }
     }
 
-    DisposableEffect(handLandmarkEngine, ringBitmap) {
-        onDispose {
-            handLandmarkEngine.close()
-            ringBitmap?.recycle()
-        }
-    }
-
-    val activeSession = session
-    val frame = latestFrame
-    val transform =
-        remember(frame?.width, frame?.height, overlayWidth, overlayHeight) {
-            PreviewCoordinateMapper.frameToViewport(
-                frameWidth = frame?.width ?: 0,
-                frameHeight = frame?.height ?: 0,
-                viewportWidth = overlayWidth,
-                viewportHeight = overlayHeight,
-            )
-        }
-    val overlayModifier =
-        Modifier
-            .fillMaxSize()
-            .pointerInput(activeSession?.mode, transform.scale) {
-                detectTransformGestures { _, pan, zoom, rotation ->
-                    if (activeSession?.mode != TryOnMode.Manual) return@detectTransformGestures
-                    val currentManual = manualPlacement ?: activeSession.placement
-                    val delta = PreviewCoordinateMapper.viewportDeltaToFrame(pan.x, pan.y, transform)
-                    val frameWidth = frame?.width ?: overlayWidth.coerceAtLeast(1)
-                    val minWidth = 22f
-                    val maxWidth = frameWidth * 0.55f
-                    val nextPlacement =
-                        currentManual.copy(
-                            centerX = currentManual.centerX + delta.x,
-                            centerY = currentManual.centerY + delta.y,
-                            ringWidthPx = (currentManual.ringWidthPx * zoom).coerceIn(minWidth, maxWidth),
-                            rotationDegrees = currentManual.rotationDegrees + rotation,
-                        )
-                    manualPlacement = nextPlacement
-                    session = activeSession.copy(mode = TryOnMode.Manual, placement = nextPlacement)
-                }
-            }
-
+    val currentSession = session
+    val frameWidth = latestFrame?.width ?: 0
+    val frameHeight = latestFrame?.height ?: 0
     Box(modifier = modifier.fillMaxSize()) {
-        AndroidView(
-            factory = { previewView },
+        AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+        TryOnOverlay(
+            ringBitmap = ringBitmap,
+            frameWidth = frameWidth,
+            frameHeight = frameHeight,
+            placement = currentSession?.placement,
+            anchor = currentSession?.anchor,
+            renderer = previewRenderer,
+            manualAdjustEnabled = manualAdjustEnabled || currentSession?.mode == TryOnMode.Manual,
+            onManualTransform = { panXFrame, panYFrame, zoom, rotationDeg ->
+                val oldPlacement = manualPlacement ?: currentSession?.placement ?: return@TryOnOverlay
+                val baseSession =
+                    currentSession
+                        ?: sessionResolver.resolve(
+                            asset = activeAsset,
+                            handPose = handPoseProvider.latestPose(),
+                            measurement = measurementProvider.latestMeasurement(),
+                            manualPlacement = oldPlacement,
+                            previousSession = null,
+                            frameWidth = frameWidth.coerceAtLeast(1080),
+                            frameHeight = frameHeight.coerceAtLeast(1920),
+                        )
+                val safeFrameWidth = frameWidth.coerceAtLeast(1)
+                val next =
+                    oldPlacement.copy(
+                        centerX = oldPlacement.centerX + panXFrame,
+                        centerY = oldPlacement.centerY + panYFrame,
+                        ringWidthPx = (oldPlacement.ringWidthPx * zoom).coerceIn(20f, safeFrameWidth * 0.6f),
+                        rotationDegrees = oldPlacement.rotationDegrees + rotationDeg,
+                    )
+                manualPlacement = next
+                manualAdjustEnabled = true
+                session = baseSession.copy(mode = TryOnMode.Manual, placement = next)
+            },
             modifier = Modifier.fillMaxSize(),
         )
-        Canvas(
-            modifier =
-                overlayModifier
-                    .fillMaxSize()
-                    .align(Alignment.Center)
-                    .background(androidx.compose.ui.graphics.Color.Transparent)
-                    .padding(0.dp),
-        ) {
-            overlayWidth = size.width.toInt()
-            overlayHeight = size.height.toInt()
-            if (ringBitmap != null && activeSession != null && frame != null) {
-                val mappedPlacement = PreviewCoordinateMapper.placementToViewport(activeSession.placement, transform)
-                renderer.drawOverlay(
-                    canvas = drawContext.canvas.nativeCanvas,
-                    ringBitmap = ringBitmap,
-                    placement = mappedPlacement,
-                    alpha = 240,
-                )
-            }
-        }
 
         Column(
             modifier =
                 Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .background(
-                        color = androidx.compose.ui.graphics.Color(0xAA000000),
-                        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
-                    )
+                    .background(Color(0xAA000000), RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
                     .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = "Mode: ${activeSession?.mode.toModeLabel()}",
-                color = androidx.compose.ui.graphics.Color.White,
+                text = "Mode: ${currentSession?.mode.toModeLabel()}",
+                color = Color.White,
                 style = MaterialTheme.typography.titleMedium,
             )
             Text(
-                text =
-                    "measurement=${activeSession?.quality?.measurementUsable == true} " +
-                        "landmark=${activeSession?.quality?.landmarkUsable == true}",
-                color = androidx.compose.ui.graphics.Color(0xFFE0E0E0),
+                text = runtimeMetrics.toRuntimeText(),
+                color = Color(0xFFE0E0E0),
                 style = MaterialTheme.typography.bodySmall,
             )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = {
-                        val updated =
-                            buildSession(
-                                ringProduct = ringProduct,
-                                measurementResult = measurementResult,
-                                latestDetection = latestDetection,
-                                latestFrame = latestFrame,
-                                placementCalculator = placementCalculator,
-                                manualPlacement = manualPlacement,
-                                overlayWidth = overlayWidth,
-                                overlayHeight = overlayHeight,
+                        manualAdjustEnabled = false
+                        session =
+                            sessionResolver.resolve(
+                                asset = activeAsset,
+                                handPose = handPoseProvider.latestPose(),
+                                measurement = measurementProvider.latestMeasurement(),
+                                manualPlacement = null,
+                                previousSession = session,
+                                frameWidth = latestFrame?.width ?: 1080,
+                                frameHeight = latestFrame?.height ?: 1920,
                             )
-                        session = updated
-                        if (updated.mode != TryOnMode.Manual) manualPlacement = null
                     },
-                    enabled = ringBitmap != null,
                     modifier = Modifier.weight(1f),
+                    enabled = ringBitmap != null,
                 ) {
                     Text("Thử detect tay")
                 }
                 Button(
                     onClick = {
-                        val currentSession =
-                            activeSession
-                                ?: buildSession(
-                                    ringProduct = ringProduct,
-                                    measurementResult = measurementResult,
-                                    latestDetection = latestDetection,
-                                    latestFrame = latestFrame,
-                                    placementCalculator = placementCalculator,
-                                    manualPlacement = manualPlacement,
-                                    overlayWidth = overlayWidth,
-                                    overlayHeight = overlayHeight,
-                                )
-                        val manual = manualPlacement ?: currentSession.placement
-                        manualPlacement = manual
-                        session = currentSession.copy(mode = TryOnMode.Manual, placement = manual)
+                        val basePlacement =
+                            manualPlacement ?: currentSession?.placement ?: run {
+                                sessionResolver.resolve(
+                                    asset = activeAsset,
+                                    handPose = null,
+                                    measurement = null,
+                                    manualPlacement = null,
+                                    previousSession = null,
+                                    frameWidth = latestFrame?.width ?: 1080,
+                                    frameHeight = latestFrame?.height ?: 1920,
+                                ).placement
+                            }
+                        manualPlacement = basePlacement
+                        manualAdjustEnabled = true
+                        session =
+                            (currentSession
+                                ?: sessionResolver.resolve(
+                                    asset = activeAsset,
+                                    handPose = handPoseProvider.latestPose(),
+                                    measurement = measurementProvider.latestMeasurement(),
+                                    manualPlacement = basePlacement,
+                                    previousSession = null,
+                                    frameWidth = latestFrame?.width ?: 1080,
+                                    frameHeight = latestFrame?.height ?: 1920,
+                                )).copy(
+                                mode = TryOnMode.Manual,
+                                placement = basePlacement,
+                            )
                     },
-                    enabled = ringBitmap != null,
                     modifier = Modifier.weight(1f),
+                    enabled = ringBitmap != null,
                 ) {
                     Text("Manual adjust")
                 }
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = {
                         measureLauncher.launch(
@@ -321,17 +332,26 @@ fun TryOnDemoScreen(
                 }
                 Button(
                     onClick = {
-                        if (ringBitmap == null || activeSession == null || frame == null) return@Button
+                        val frame = latestFrame ?: return@Button
+                        val active = currentSession ?: return@Button
+                        val overlay = ringBitmap ?: return@Button
                         val rendered =
-                            renderer.renderToBitmap(
+                            exportRenderer.renderToBitmap(
                                 baseFrame = frame,
-                                ringBitmap = ringBitmap,
-                                placement = activeSession.placement,
-                                mode = activeSession.mode,
+                                ringBitmap = overlay,
+                                rawPlacement = active.placement,
+                                anchor = active.anchor,
+                                mode = active.mode,
                             )
                         val file = saveRenderedBitmap(context, rendered.bitmap)
                         exportedPath = file.absolutePath
-                        Toast.makeText(context, "Đã export: ${file.name}", Toast.LENGTH_SHORT).show()
+                        val note =
+                            if (rendered.validation.notes.isEmpty()) {
+                                "ok"
+                            } else {
+                                rendered.validation.notes.joinToString()
+                            }
+                        Toast.makeText(context, "Export: ${file.name} ($note)", Toast.LENGTH_SHORT).show()
                         rendered.bitmap.recycle()
                     },
                     modifier = Modifier.weight(1f),
@@ -339,17 +359,10 @@ fun TryOnDemoScreen(
                     Text("Export/capture")
                 }
             }
-            if (exportedPath != null) {
+            exportedPath?.let {
                 Text(
-                    text = "Saved: $exportedPath",
-                    color = androidx.compose.ui.graphics.Color(0xFFB2FF59),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            if (!hasCameraPermission) {
-                Text(
-                    text = "Cần quyền camera để detect landmark.",
-                    color = androidx.compose.ui.graphics.Color(0xFFFFAB91),
+                    text = "Saved: $it",
+                    color = Color(0xFFB2FF59),
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -357,27 +370,63 @@ fun TryOnDemoScreen(
     }
 }
 
-private fun buildSession(
-    ringProduct: com.handmeasure.sample.tryon.domain.RingProduct,
-    measurementResult: HandMeasureResult?,
-    latestDetection: HandDetection?,
-    latestFrame: Bitmap?,
-    placementCalculator: RingPlacementCalculator,
-    manualPlacement: RingPlacement?,
-    overlayWidth: Int,
-    overlayHeight: Int,
-): TryOnSession {
-    val frameWidth = latestFrame?.width ?: overlayWidth.coerceAtLeast(1080)
-    val frameHeight = latestFrame?.height ?: overlayHeight.coerceAtLeast(1920)
-    return placementCalculator.resolveSession(
-        product = ringProduct,
-        measurementResult = measurementResult,
-        handDetection = latestDetection,
-        frameWidth = frameWidth,
-        frameHeight = frameHeight,
-        manualPlacement = manualPlacement,
-    )
+private fun upsertSnapshot(
+    existing: Bitmap?,
+    source: Bitmap,
+): Bitmap {
+    if (existing != null && existing.width == source.width && existing.height == source.height && existing.isMutable) {
+        val canvas = android.graphics.Canvas(existing)
+        canvas.drawBitmap(source, 0f, 0f, null)
+        return existing
+    }
+    existing?.recycle()
+    return source.copy(Bitmap.Config.ARGB_8888, true)
 }
+
+private class MutableHandPoseProvider : HandPoseProvider {
+    var snapshot: HandPoseSnapshot? = null
+
+    override fun latestPose(): HandPoseSnapshot? = snapshot
+}
+
+private class MutableMeasurementProvider : OptionalMeasurementProvider {
+    var snapshot: MeasurementSnapshot? = null
+
+    override fun latestMeasurement(): MeasurementSnapshot? = snapshot
+}
+
+private fun RuntimeMetrics?.toRuntimeText(): String {
+    val metrics = this ?: return "Realtime: waiting..."
+    val hz =
+        if (metrics.avgUpdateIntervalMs <= 0.0) {
+            0
+        } else {
+            (1000.0 / metrics.avgUpdateIntervalMs).roundToInt()
+        }
+    return "Realtime detect=${"%.1f".format(metrics.avgDetectionMs)}ms update=${hz}Hz memΔ=${metrics.approxMemoryDeltaKb}KB"
+}
+
+private fun HandDetection.toPoseSnapshot(
+    width: Int,
+    height: Int,
+    timestampMs: Long,
+): HandPoseSnapshot =
+    HandPoseSnapshot(
+        frameWidth = width,
+        frameHeight = height,
+        landmarks = imageLandmarks.map { point -> LandmarkPoint(x = point.x, y = point.y, z = point.z) },
+        confidence = confidence.coerceIn(0f, 1f),
+        timestampMs = timestampMs,
+    )
+
+private fun HandMeasureResult.toMeasurementSnapshot(): MeasurementSnapshot =
+    MeasurementSnapshot(
+        equivalentDiameterMm = equivalentDiameterMm.toFloat(),
+        fingerWidthMm = fingerWidthMm.toFloat(),
+        confidence = confidenceScore,
+        mmPerPx = debugMetadata?.mmPerPxX?.toFloat(),
+        usable = confidenceScore >= 0.3f,
+    )
 
 private fun saveRenderedBitmap(
     context: Context,

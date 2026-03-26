@@ -1,7 +1,7 @@
-package com.handmeasure.sample.tryon.render
+package com.handtryon.render
 
 import androidx.compose.ui.geometry.Offset
-import com.handmeasure.sample.tryon.domain.RingPlacement
+import com.handtryon.domain.RingPlacement
 
 data class FrameToViewportTransform(
     val scale: Float,
@@ -22,12 +22,10 @@ object PreviewCoordinateMapper {
         val scale = minOf(viewportWidth / frameWidth.toFloat(), viewportHeight / frameHeight.toFloat())
         val mappedWidth = frameWidth * scale
         val mappedHeight = frameHeight * scale
-        val offsetX = (viewportWidth - mappedWidth) * 0.5f
-        val offsetY = (viewportHeight - mappedHeight) * 0.5f
         return FrameToViewportTransform(
             scale = scale,
-            offsetX = offsetX,
-            offsetY = offsetY,
+            offsetX = (viewportWidth - mappedWidth) * 0.5f,
+            offsetY = (viewportHeight - mappedHeight) * 0.5f,
         )
     }
 

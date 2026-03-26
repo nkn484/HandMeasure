@@ -1,6 +1,7 @@
 package com.handmeasure.camera
 
 import android.content.Context
+import android.util.Size
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -21,6 +22,8 @@ class CameraController(private val context: Context) {
         previewView: PreviewView,
         analyzer: ImageAnalysis.Analyzer,
         lensFacing: LensFacing,
+        analysisOutputImageFormat: Int = ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888,
+        analysisTargetResolution: Size? = null,
         onError: (Throwable) -> Unit,
     ) {
         val providerFuture = ProcessCameraProvider.getInstance(context)
@@ -33,10 +36,12 @@ class CameraController(private val context: Context) {
                         Preview.Builder()
                             .build()
                             .also { useCase -> useCase.surfaceProvider = previewView.surfaceProvider }
-                    val analysis =
+                    val analysisBuilder =
                         ImageAnalysis.Builder()
                             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                            .build()
+                            .setOutputImageFormat(analysisOutputImageFormat)
+                    analysisTargetResolution?.let { analysisBuilder.setTargetResolution(it) }
+                    val analysis = analysisBuilder.build()
                     analysis.setAnalyzer(analysisExecutor, analyzer)
                     provider.unbindAll()
                     provider.bindToLifecycle(
