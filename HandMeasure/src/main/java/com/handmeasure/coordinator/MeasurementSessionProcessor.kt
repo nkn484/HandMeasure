@@ -13,6 +13,7 @@ import com.handmeasure.vision.PoseClassifier
 import com.handmeasure.vision.ReferenceCardDetector
 import com.handmeasure.core.session.MeasurementSessionFinalizationUseCase
 import com.handmeasure.core.session.MeasurementSessionProcessingUseCase
+import com.handmeasure.core.session.StepRuntimeAnalysisUseCase
 
 internal data class SessionProcessingOutput(
     val warnings: Set<HandMeasureWarning>,
@@ -40,21 +41,30 @@ internal class MeasurementSessionProcessor(
     private val poseTargets: Map<CaptureStep, PoseTarget>,
 ) {
     private val mapper = AndroidSessionProcessingMapper()
+    private val runtimeAnalyzerPort =
+        AndroidSessionRuntimeAnalyzerPort(
+            handLandmarkEngine = handLandmarkEngine,
+            referenceCardDetector = referenceCardDetector,
+            poseClassifier = poseClassifier,
+            scaleCalibrator = scaleCalibrator,
+            fingerMeasurementPort = fingerMeasurementPort,
+            frameSignalEstimator = frameSignalEstimator,
+            frameAnnotator = frameAnnotator,
+            poseTargets = poseTargets,
+        )
+    private val stepRuntimeAnalysisUseCase: AndroidStepRuntimeAnalysisUseCase =
+        StepRuntimeAnalysisUseCase(
+            runtimeAnalyzerPort = runtimeAnalyzerPort,
+            targetFinger = config.targetFinger,
+        )
     private val processingUseCase =
         MeasurementSessionProcessingUseCase(
             finalizationUseCase =
                 MeasurementSessionFinalizationUseCase(
                     stepAnalyzer =
                         AndroidSessionStepAnalyzer(
-                            config = config,
-                            handLandmarkEngine = handLandmarkEngine,
-                            referenceCardDetector = referenceCardDetector,
-                            poseClassifier = poseClassifier,
-                            scaleCalibrator = scaleCalibrator,
-                            fingerMeasurementPort = fingerMeasurementPort,
-                            frameSignalEstimator = frameSignalEstimator,
-                            frameAnnotator = frameAnnotator,
-                            poseTargets = poseTargets,
+                            overlayEnabled = config.debugOverlayEnabled,
+                            stepRuntimeAnalysisUseCase = stepRuntimeAnalysisUseCase,
                         ),
                 ),
         )

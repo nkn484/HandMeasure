@@ -123,3 +123,36 @@ New unit tests in `:handmeasure-core`:
   - MediaPipe hand/card inference and pose scoring
   - OpenCV-based width measurement through Android port implementation
 - Public Parcelable API models remain Android-side (`HandMeasureConfig`, `HandMeasureResult`, diagnostics payloads)
+
+## Phase 4 update: step runtime boundary extraction
+
+### New core runtime-analysis contracts
+
+- Added `StepRuntimeAnalysisRequest` in `core.session`
+- Added `SessionRuntimeAnalyzerPort` in `core.session`
+- Added `StepRuntimeAnalysisUseCase` in `core.session`
+- Added core tests for this orchestration:
+  - `StepRuntimeAnalysisUseCaseTest`
+
+### Android runtime split
+
+- Added `AndroidSessionRuntimeAnalyzerPort` in `:HandMeasure`
+  - owns runtime inference calls (hand/card detect, pose score, coplanarity proxy)
+  - owns Android-side scale calibration + card diagnostics mapping + OpenCV width measurement invocation
+  - owns debug overlay JPEG generation
+- `AndroidSessionStepAnalyzer` is now a thin adapter:
+  - decode bytes -> `Bitmap`
+  - delegate to core `StepRuntimeAnalysisUseCase`
+  - recycle `Bitmap`
+
+### Boundary after this phase
+
+- Core now owns step-analysis orchestration/composition policy for:
+  - hand/card/pose/coplanarity flow sequencing
+  - effective-scale selection for measurement
+  - `SessionStepAnalysis` assembly
+  - overlay inclusion policy (based on request flag)
+- Android remains responsible for:
+  - runtime engines and Android image types
+  - MediaPipe/OpenCV execution
+  - conversion from runtime outputs to core-neutral contracts
