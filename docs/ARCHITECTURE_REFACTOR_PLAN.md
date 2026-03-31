@@ -231,3 +231,20 @@ New unit tests in `:handmeasure-core`:
 ### Tests
 
 - Added `AndroidFingerRuntimeAdapterTest` to validate request construction and delegation through the core-facing port contract.
+
+## Phase 8 correction: boundary alignment verification
+
+### Corrected/verified boundary rules
+
+- Higher runtime/session layer (`AndroidFingerRuntimeAdapter`) builds and forwards `SessionFingerMeasurementRequest` directly.
+- Higher runtime/session layer no longer constructs `MetricScale` and does not know OpenCV request/executor types.
+- `HandMeasureCoordinator` wiring depends on `AndroidFingerMeasurementPort` and no longer references `FingerMeasurementEngine` in constructor dependencies.
+
+### Conversion placement (kept)
+
+- `SessionScale` -> `MetricScale` conversion remains isolated in `OpenCvFingerMeasurementMapper` under `OpenCvSessionFingerMeasurementPort`.
+- OpenCV request shaping/execution remains Android-only below the port boundary.
+
+### Tests
+
+- `AndroidFingerRuntimeAdapterTest` now includes an additional constructor-boundary assertion for `HandMeasureCoordinator` (port dependency present, engine dependency absent).

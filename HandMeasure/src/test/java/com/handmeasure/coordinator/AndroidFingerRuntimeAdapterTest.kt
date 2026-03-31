@@ -3,11 +3,13 @@ package com.handmeasure.coordinator
 import android.graphics.Bitmap
 import com.google.common.truth.Truth.assertThat
 import com.handmeasure.api.TargetFinger
+import com.handmeasure.measurement.FingerMeasurementEngine
 import com.handmeasure.vision.HandDetection
 import com.handmeasure.vision.Landmark2D
 import com.handmeasure.vision.Landmark3D
 import com.handmeasure.core.measurement.WidthMeasurementSource
 import com.handmeasure.core.session.SessionFingerMeasurement
+import com.handmeasure.core.session.SessionFingerMeasurementPort
 import com.handmeasure.core.session.SessionFingerMeasurementRequest
 import com.handmeasure.core.session.SessionScale
 import org.junit.Test
@@ -46,6 +48,27 @@ class AndroidFingerRuntimeAdapterTest {
         assertThat(capturedRequest?.hand).isEqualTo(hand)
         assertThat(capturedRequest?.targetFinger).isEqualTo(TargetFinger.RING)
         assertThat(capturedRequest?.scale).isEqualTo(scale)
+    }
+
+    @Test
+    fun coordinator_constructorDependsOnPortNotEngine() {
+        val constructors = HandMeasureCoordinator::class.java.declaredConstructors
+
+        val dependsOnEngine =
+            constructors.any { constructor ->
+                constructor.parameterTypes.any { parameterType ->
+                    parameterType == FingerMeasurementEngine::class.java
+                }
+            }
+        val dependsOnPort =
+            constructors.any { constructor ->
+                constructor.parameterTypes.any { parameterType ->
+                    parameterType == SessionFingerMeasurementPort::class.java
+                }
+            }
+
+        assertThat(dependsOnEngine).isFalse()
+        assertThat(dependsOnPort).isTrue()
     }
 
     private fun sampleHand(): HandDetection =
