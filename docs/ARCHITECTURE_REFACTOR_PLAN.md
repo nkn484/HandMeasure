@@ -56,3 +56,39 @@ New unit tests in `:handmeasure-core`:
 - Introduce core-facing config/result domain models and mapper layer from parcelable APIs.
 - Extract additional non-Android session/finalization policies from `MeasurementSessionProcessor`.
 - Reduce `HandMeasureCoordinator` into a thinner orchestrator using core use-cases.
+
+## Phase 2 update: session finalization engine split
+
+### New core use case and contracts
+
+- Added `com.handmeasure.core.session.MeasurementSessionFinalizationUseCase`
+- Added core session contracts/models:
+  - `SessionStepCandidate`
+  - `SessionQualityThresholds`
+  - `SessionStepAnalyzer` (core boundary interface)
+  - `SessionStepAnalysis`
+  - `SessionProcessingResult`
+  - supporting diagnostics/scale/measurement models in `core.session`
+
+### New Android adapter
+
+- Added `com.handmeasure.coordinator.AndroidSessionStepAnalyzer` in `:HandMeasure`
+  - decodes frame bytes to `Bitmap`
+  - runs MediaPipe/OpenCV detection (`HandLandmarkEngine`, `ReferenceCardDetector`)
+  - runs `ScaleCalibrator` + `FingerMeasurementEngine`
+  - builds neutral `SessionStepAnalysis` for core use case
+- `MeasurementSessionProcessor` is now an adapter/orchestrator:
+  - maps `StepCandidate` -> core `SessionStepCandidate`
+  - invokes `MeasurementSessionFinalizationUseCase`
+  - maps core outputs back to existing Android API models (`StepDiagnostics`, warnings, etc.)
+
+### FingerMeasurementEngine boundary progress
+
+- First boundary step is in place through `SessionStepAnalyzer`:
+  - core finalization logic no longer depends on `FingerMeasurementEngine` directly
+  - OpenCV measurement remains in Android analyzer implementation only
+
+### Tests
+
+- Added core tests for session finalization logic:
+  - `MeasurementSessionFinalizationUseCaseTest`

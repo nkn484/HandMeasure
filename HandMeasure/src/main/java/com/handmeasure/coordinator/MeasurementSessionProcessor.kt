@@ -1,20 +1,30 @@
 package com.handmeasure.coordinator
 
-import android.graphics.BitmapFactory
 import com.handmeasure.api.CalibrationStatus
 import com.handmeasure.api.CaptureStep
 import com.handmeasure.api.HandMeasureConfig
 import com.handmeasure.api.HandMeasureWarning
+import com.handmeasure.api.MeasurementSource
 import com.handmeasure.api.StepDiagnostics
 import com.handmeasure.flow.StepCandidate
 import com.handmeasure.measurement.FingerMeasurementEngine
-import com.handmeasure.measurement.MetricScale
 import com.handmeasure.measurement.ScaleCalibrator
 import com.handmeasure.measurement.StepMeasurement
 import com.handmeasure.measurement.WidthMeasurementSource
-import com.handmeasure.measurement.toApiSource
 import com.handmeasure.vision.HandLandmarkEngine
 import com.handmeasure.vision.PoseClassifier
+import com.handmeasure.vision.ReferenceCardDetector
+import com.handmeasure.core.measurement.CalibrationStatus as CoreCalibrationStatus
+import com.handmeasure.core.measurement.CaptureStep as CoreCaptureStep
+import com.handmeasure.core.measurement.HandMeasureWarning as CoreHandMeasureWarning
+import com.handmeasure.core.measurement.MeasurementSource as CoreMeasurementSource
+import com.handmeasure.core.measurement.StepMeasurement as CoreStepMeasurement
+import com.handmeasure.core.measurement.WidthMeasurementSource as CoreWidthMeasurementSource
+import com.handmeasure.core.session.MeasurementSessionFinalizationUseCase
+import com.handmeasure.core.session.SessionProcessingResult as CoreSessionProcessingResult
+import com.handmeasure.core.session.SessionQualityThresholds
+import com.handmeasure.core.session.SessionStepCandidate
+import com.handmeasure.core.session.SessionStepDiagnostics as CoreSessionStepDiagnostics
 
 internal data class SessionProcessingOutput(
     val warnings: Set<HandMeasureWarning>,
@@ -33,7 +43,7 @@ internal data class SessionProcessingOutput(
 internal class MeasurementSessionProcessor(
     private val config: HandMeasureConfig,
     private val handLandmarkEngine: HandLandmarkEngine,
-    private val referenceCardDetector: com.handmeasure.vision.ReferenceCardDetector,
+    private val referenceCardDetector: ReferenceCardDetector,
     private val poseClassifier: PoseClassifier,
     private val scaleCalibrator: ScaleCalibrator,
     private val fingerMeasurementEngine: FingerMeasurementEngine,
@@ -41,177 +51,171 @@ internal class MeasurementSessionProcessor(
     private val frameAnnotator: DebugFrameAnnotator,
     private val poseTargets: Map<CaptureStep, PoseTarget>,
 ) {
+    private val finalizationUseCase =
+        MeasurementSessionFinalizationUseCase(
+            stepAnalyzer =
+                AndroidSessionStepAnalyzer(
+                    config = config,
+                    handLandmarkEngine = handLandmarkEngine,
+                    referenceCardDetector = referenceCardDetector,
+                    poseClassifier = poseClassifier,
+                    scaleCalibrator = scaleCalibrator,
+                    fingerMeasurementEngine = fingerMeasurementEngine,
+                    frameSignalEstimator = frameSignalEstimator,
+                    frameAnnotator = frameAnnotator,
+                    poseTargets = poseTargets,
+                ),
+        )
+
     fun process(stepResults: List<StepCandidate>): SessionProcessingOutput {
-        val warnings = mutableSetOf<HandMeasureWarning>()
-        val stepMeasurements = mutableListOf<StepMeasurement>()
-        val debugNotes = mutableListOf<String>()
-        val stepDiagnostics = mutableListOf<StepDiagnostics>()
-        var bestScaleMmPerPxX = 0.12
-        var bestScaleMmPerPxY = 0.12
-        var calibrationStatus = CalibrationStatus.MISSING_REFERENCE
-        var frontalWidthPx = 0.0
-        val thicknessSamples = mutableListOf<Double>()
-        val calibrationNotes = mutableListOf<String>()
-        val overlays = mutableListOf<DebugOverlayFrame>()
+        val coreResult =
+            finalizationUseCase.process(
+                stepCandidates = stepResults.map { it.toCoreCandidate() },
+                thresholds =
+                    SessionQualityThresholds(
+                        cardMinScore = config.qualityThresholds.cardMinScore,
+                        lightingMinScore = config.qualityThresholds.lightingMinScore,
+                        blurMinScore = config.qualityThresholds.blurMinScore,
+                        motionMinScore = config.qualityThresholds.motionMinScore,
+                    ),
+            )
+        return coreResult.toAndroidOutput()
+    }
 
-        stepResults.forEach { candidate ->
-            val bitmap = BitmapFactory.decodeByteArray(candidate.frameBytes, 0, candidate.frameBytes.size) ?: return@forEach
-            try {
-                val hand = handLandmarkEngine.detect(bitmap)
-                val card = referenceCardDetector.detect(bitmap)
-                val poseScore = hand?.let { poseTargets[candidate.step]?.let { target -> poseClassifier.classify(target, it) } } ?: candidate.poseScore
-                val coplanarityProxyScore =
-                    frameSignalEstimator.estimateFingerCard2dProximity(
-                        hand = hand,
-                        card = card,
-                        frameWidth = bitmap.width,
-                        frameHeight = bitmap.height,
-                        targetFinger = config.targetFinger,
-                    )
+    private fun StepCandidate.toCoreCandidate(): SessionStepCandidate =
+        SessionStepCandidate(
+            step = step.toCoreStep(),
+            frameBytes = frameBytes,
+            qualityScore = qualityScore,
+            poseScore = poseScore,
+            cardScore = cardScore,
+            handScore = handScore,
+            blurScore = blurScore,
+            motionScore = motionScore,
+            lightingScore = lightingScore,
+            confidencePenaltyReasons = confidencePenaltyReasons,
+        )
 
-                if (candidate.cardScore < config.qualityThresholds.cardMinScore) warnings += HandMeasureWarning.LOW_CARD_CONFIDENCE
-                if (poseScore < 0.45f) warnings += HandMeasureWarning.LOW_POSE_CONFIDENCE
-                if (candidate.lightingScore < config.qualityThresholds.lightingMinScore) warnings += HandMeasureWarning.LOW_LIGHTING
-
-                val scaleResult =
-                    if (card != null) {
-                        scaleCalibrator.calibrateWithDiagnostics(card)
-                    } else {
-                        warnings += HandMeasureWarning.BEST_EFFORT_ESTIMATE
-                        null
-                    }
-                val scale = scaleResult?.scale
-                if (scale != null) {
-                    bestScaleMmPerPxX = scale.mmPerPxX
-                    bestScaleMmPerPxY = scale.mmPerPxY
-                }
-                if (scaleResult != null) {
-                    calibrationNotes += "step=${candidate.step.name}:${scaleResult.diagnostics.notes.joinToString("|")}"
-                    calibrationStatus =
-                        when {
-                            calibrationStatus == CalibrationStatus.DEGRADED -> CalibrationStatus.DEGRADED
-                            scaleResult.diagnostics.status == CalibrationStatus.DEGRADED -> CalibrationStatus.DEGRADED
-                            calibrationStatus == CalibrationStatus.CALIBRATED -> CalibrationStatus.CALIBRATED
-                            else -> scaleResult.diagnostics.status
-                        }
-                    if (scaleResult.diagnostics.status == CalibrationStatus.DEGRADED) {
-                        warnings += HandMeasureWarning.CALIBRATION_WEAK
-                    }
-                }
-
-                val effectiveScale = scale ?: MetricScale(bestScaleMmPerPxX, bestScaleMmPerPxY)
-                val measurement =
-                    if (hand != null) {
-                        fingerMeasurementEngine.measureVisibleWidth(bitmap, hand, config.targetFinger, effectiveScale)
-                    } else {
-                        warnings += HandMeasureWarning.BEST_EFFORT_ESTIMATE
-                        null
-                    }
-
-                val measurementSource = measurement?.source ?: WidthMeasurementSource.DEFAULT_HEURISTIC
-                val widthMm = measurement?.widthMm ?: 18.0
-                val usedFallback = measurement?.usedFallback ?: true
-                val measurementConfidence = measurementConfidence(measurement)
-                if (usedFallback) warnings += HandMeasureWarning.BEST_EFFORT_ESTIMATE
-                if (candidate.step == CaptureStep.FRONT_PALM) {
-                    frontalWidthPx = measurement?.widthPx ?: frontalWidthPx
-                } else {
-                    thicknessSamples += widthMm
-                }
-
-                stepMeasurements +=
-                    StepMeasurement(
-                        step = candidate.step,
-                        widthMm = widthMm,
-                        confidence = candidate.qualityScore,
-                        measurementConfidence = measurementConfidence,
-                        rawWidthMm = widthMm,
-                        measurementSource = measurementSource,
-                        usedFallback = usedFallback,
-                        debugNotes =
-                            listOf(
-                                "validSamples=${measurement?.validSamples ?: 0}",
-                                "widthVarianceMm=${measurement?.widthVarianceMm ?: -1.0}",
-                                "fallback=$usedFallback",
-                                "source=$measurementSource",
-                            ),
-                    )
-
-                stepDiagnostics +=
-                    StepDiagnostics(
-                        step = candidate.step,
-                        handScore = candidate.handScore,
-                        cardScore = candidate.cardScore,
-                        poseScore = poseScore,
-                        blurScore = candidate.blurScore,
-                        motionScore = candidate.motionScore,
-                        lightingScore = candidate.lightingScore,
-                        cardCoverageRatio = card?.coverageRatio ?: 0f,
-                        cardAspectResidual = card?.aspectResidual ?: 1f,
-                        cardRectangularityScore = card?.rectangularityScore ?: 0f,
-                        cardEdgeSupportScore = card?.edgeSupportScore ?: 0f,
-                        cardRectificationConfidence = card?.rectificationConfidence ?: 0f,
-                        scaleMmPerPxX = effectiveScale.mmPerPxX,
-                        scaleMmPerPxY = effectiveScale.mmPerPxY,
-                        widthSamplesMm = measurement?.sampledWidthsMm ?: emptyList(),
-                        widthVarianceMm = measurement?.widthVarianceMm ?: 999.0,
-                        accepted = measurement != null,
-                        rejectedReason = if (measurement == null || measurement.usedFallback) "fallback_or_no_edges" else null,
-                        confidencePenaltyReasons = candidate.confidencePenaltyReasons,
-                        measurementSource = measurementSource.toApiSource(),
-                        usedFallback = usedFallback,
-                        coplanarityProxyScore = coplanarityProxyScore,
-                    )
-
-                if (config.debugOverlayEnabled) {
-                    overlays +=
-                        DebugOverlayFrame(
-                            stepName = candidate.step.name,
-                            jpegBytes = frameAnnotator.encodeAnnotatedJpeg(bitmap, hand, card),
-                        )
-                }
-            } finally {
-                bitmap.recycle()
-            }
-        }
-
-        if (stepMeasurements.isEmpty()) {
-            warnings += HandMeasureWarning.BEST_EFFORT_ESTIMATE
-            stepMeasurements +=
-                StepMeasurement(
-                    step = CaptureStep.FRONT_PALM,
-                    widthMm = 18.0,
-                    confidence = 0.2f,
-                    measurementConfidence = 0.2f,
-                    measurementSource = WidthMeasurementSource.DEFAULT_HEURISTIC,
-                    usedFallback = true,
-                )
-        }
-
-        if (stepResults.any { it.blurScore < config.qualityThresholds.blurMinScore }) warnings += HandMeasureWarning.HIGH_BLUR
-        if (stepResults.any { it.motionScore < config.qualityThresholds.motionMinScore }) warnings += HandMeasureWarning.HIGH_MOTION
-
-        return SessionProcessingOutput(
-            warnings = warnings,
-            stepMeasurements = stepMeasurements,
-            stepDiagnostics = stepDiagnostics,
+    private fun CoreSessionProcessingResult.toAndroidOutput(): SessionProcessingOutput =
+        SessionProcessingOutput(
+            warnings = warnings.map { it.toApiWarning() }.toSet(),
+            stepMeasurements = stepMeasurements.map { it.toAndroidStepMeasurement() },
+            stepDiagnostics = stepDiagnostics.map { it.toApiStepDiagnostics() },
             bestScaleMmPerPxX = bestScaleMmPerPxX,
             bestScaleMmPerPxY = bestScaleMmPerPxY,
-            calibrationStatus = calibrationStatus,
+            calibrationStatus = calibrationStatus.toApiCalibrationStatus(),
             frontalWidthPx = frontalWidthPx,
             thicknessSamples = thicknessSamples,
             debugNotes = debugNotes,
             calibrationNotes = calibrationNotes,
-            overlays = overlays,
+            overlays =
+                overlays.map { overlay ->
+                    DebugOverlayFrame(
+                        stepName = overlay.stepName,
+                        jpegBytes = overlay.jpegBytes,
+                    )
+                },
         )
-    }
 
-    private fun measurementConfidence(measurement: com.handmeasure.measurement.FingerWidthMeasurement?): Float {
-        if (measurement == null) return 0.18f
-        return (
-            (if (measurement.usedFallback) 0.35f else 0.85f) * 0.35f +
-                (1f - (measurement.widthVarianceMm / 4.0).toFloat().coerceIn(0f, 1f)) * 0.35f +
-                (measurement.validSamples / 7f).coerceIn(0f, 1f) * 0.30f
-        ).coerceIn(0f, 1f)
-    }
+    private fun CoreSessionStepDiagnostics.toApiStepDiagnostics(): StepDiagnostics =
+        StepDiagnostics(
+            step = step.toApiStep(),
+            handScore = handScore,
+            cardScore = cardScore,
+            poseScore = poseScore,
+            blurScore = blurScore,
+            motionScore = motionScore,
+            lightingScore = lightingScore,
+            cardCoverageRatio = cardCoverageRatio,
+            cardAspectResidual = cardAspectResidual,
+            cardRectangularityScore = cardRectangularityScore,
+            cardEdgeSupportScore = cardEdgeSupportScore,
+            cardRectificationConfidence = cardRectificationConfidence,
+            scaleMmPerPxX = scaleMmPerPxX,
+            scaleMmPerPxY = scaleMmPerPxY,
+            widthSamplesMm = widthSamplesMm,
+            widthVarianceMm = widthVarianceMm,
+            accepted = accepted,
+            rejectedReason = rejectedReason,
+            confidencePenaltyReasons = confidencePenaltyReasons,
+            measurementSource = measurementSource.toApiMeasurementSource(),
+            usedFallback = usedFallback,
+            coplanarityProxyScore = coplanarityProxyScore,
+            coplanarityProxyKind = coplanarityProxyKind,
+        )
+
+    private fun CoreStepMeasurement.toAndroidStepMeasurement(): StepMeasurement =
+        StepMeasurement(
+            step = step.toApiStep(),
+            widthMm = widthMm,
+            confidence = confidence,
+            measurementConfidence = measurementConfidence,
+            rawWidthMm = rawWidthMm,
+            measurementSource = measurementSource.toAndroidWidthSource(),
+            usedFallback = usedFallback,
+            debugNotes = debugNotes,
+        )
+
+    private fun CoreCaptureStep.toApiStep(): CaptureStep =
+        when (this) {
+            CoreCaptureStep.FRONT_PALM -> CaptureStep.FRONT_PALM
+            CoreCaptureStep.LEFT_OBLIQUE -> CaptureStep.LEFT_OBLIQUE
+            CoreCaptureStep.RIGHT_OBLIQUE -> CaptureStep.RIGHT_OBLIQUE
+            CoreCaptureStep.UP_TILT -> CaptureStep.UP_TILT
+            CoreCaptureStep.DOWN_TILT -> CaptureStep.DOWN_TILT
+            CoreCaptureStep.BACK_OF_HAND -> CaptureStep.BACK_OF_HAND
+            CoreCaptureStep.LEFT_OBLIQUE_DORSAL -> CaptureStep.LEFT_OBLIQUE_DORSAL
+            CoreCaptureStep.RIGHT_OBLIQUE_DORSAL -> CaptureStep.RIGHT_OBLIQUE_DORSAL
+            CoreCaptureStep.UP_TILT_DORSAL -> CaptureStep.UP_TILT_DORSAL
+            CoreCaptureStep.DOWN_TILT_DORSAL -> CaptureStep.DOWN_TILT_DORSAL
+        }
+
+    private fun CaptureStep.toCoreStep(): CoreCaptureStep =
+        when (this) {
+            CaptureStep.FRONT_PALM -> CoreCaptureStep.FRONT_PALM
+            CaptureStep.LEFT_OBLIQUE -> CoreCaptureStep.LEFT_OBLIQUE
+            CaptureStep.RIGHT_OBLIQUE -> CoreCaptureStep.RIGHT_OBLIQUE
+            CaptureStep.UP_TILT -> CoreCaptureStep.UP_TILT
+            CaptureStep.DOWN_TILT -> CoreCaptureStep.DOWN_TILT
+            CaptureStep.BACK_OF_HAND -> CoreCaptureStep.BACK_OF_HAND
+            CaptureStep.LEFT_OBLIQUE_DORSAL -> CoreCaptureStep.LEFT_OBLIQUE_DORSAL
+            CaptureStep.RIGHT_OBLIQUE_DORSAL -> CoreCaptureStep.RIGHT_OBLIQUE_DORSAL
+            CaptureStep.UP_TILT_DORSAL -> CoreCaptureStep.UP_TILT_DORSAL
+            CaptureStep.DOWN_TILT_DORSAL -> CoreCaptureStep.DOWN_TILT_DORSAL
+        }
+
+    private fun CoreHandMeasureWarning.toApiWarning(): HandMeasureWarning =
+        when (this) {
+            CoreHandMeasureWarning.BEST_EFFORT_ESTIMATE -> HandMeasureWarning.BEST_EFFORT_ESTIMATE
+            CoreHandMeasureWarning.LOW_CARD_CONFIDENCE -> HandMeasureWarning.LOW_CARD_CONFIDENCE
+            CoreHandMeasureWarning.LOW_POSE_CONFIDENCE -> HandMeasureWarning.LOW_POSE_CONFIDENCE
+            CoreHandMeasureWarning.LOW_LIGHTING -> HandMeasureWarning.LOW_LIGHTING
+            CoreHandMeasureWarning.HIGH_MOTION -> HandMeasureWarning.HIGH_MOTION
+            CoreHandMeasureWarning.HIGH_BLUR -> HandMeasureWarning.HIGH_BLUR
+            CoreHandMeasureWarning.THICKNESS_ESTIMATED_FROM_WEAK_ANGLES -> HandMeasureWarning.THICKNESS_ESTIMATED_FROM_WEAK_ANGLES
+            CoreHandMeasureWarning.CALIBRATION_WEAK -> HandMeasureWarning.CALIBRATION_WEAK
+            CoreHandMeasureWarning.LOW_RESULT_RELIABILITY -> HandMeasureWarning.LOW_RESULT_RELIABILITY
+        }
+
+    private fun CoreCalibrationStatus.toApiCalibrationStatus(): CalibrationStatus =
+        when (this) {
+            CoreCalibrationStatus.CALIBRATED -> CalibrationStatus.CALIBRATED
+            CoreCalibrationStatus.DEGRADED -> CalibrationStatus.DEGRADED
+            CoreCalibrationStatus.MISSING_REFERENCE -> CalibrationStatus.MISSING_REFERENCE
+        }
+
+    private fun CoreMeasurementSource.toApiMeasurementSource(): MeasurementSource =
+        when (this) {
+            CoreMeasurementSource.EDGE_PROFILE -> MeasurementSource.EDGE_PROFILE
+            CoreMeasurementSource.LANDMARK_HEURISTIC -> MeasurementSource.LANDMARK_HEURISTIC
+            CoreMeasurementSource.DEFAULT_HEURISTIC -> MeasurementSource.DEFAULT_HEURISTIC
+            CoreMeasurementSource.FUSION_ESTIMATE -> MeasurementSource.FUSION_ESTIMATE
+        }
+
+    private fun CoreWidthMeasurementSource.toAndroidWidthSource(): WidthMeasurementSource =
+        when (this) {
+            CoreWidthMeasurementSource.EDGE_PROFILE -> WidthMeasurementSource.EDGE_PROFILE
+            CoreWidthMeasurementSource.LANDMARK_HEURISTIC -> WidthMeasurementSource.LANDMARK_HEURISTIC
+            CoreWidthMeasurementSource.DEFAULT_HEURISTIC -> WidthMeasurementSource.DEFAULT_HEURISTIC
+        }
 }
