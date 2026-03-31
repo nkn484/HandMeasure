@@ -1,15 +1,8 @@
 package com.handmeasure.coordinator
 
 import android.graphics.Bitmap
-import com.handmeasure.api.CalibrationStatus
-import com.handmeasure.api.CaptureProtocol
-import com.handmeasure.api.CapturedStepInfo
-import com.handmeasure.api.DebugMetadata
-import com.handmeasure.api.FusedDiagnostics
 import com.handmeasure.api.HandMeasureConfig
 import com.handmeasure.api.HandMeasureResult
-import com.handmeasure.api.SessionDiagnostics
-import com.handmeasure.api.StepDiagnostics
 import com.handmeasure.flow.CaptureUiState
 import com.handmeasure.flow.HandMeasureStateMachine
 import com.handmeasure.flow.ProtocolGuides
@@ -18,12 +11,11 @@ import com.handmeasure.measurement.FingerMeasurementEngine
 import com.handmeasure.measurement.FingerMeasurementFusion
 import com.handmeasure.measurement.FrameQualityInput
 import com.handmeasure.measurement.FrameQualityScorer
+import com.handmeasure.measurement.OpenCvSessionFingerMeasurementPort
 import com.handmeasure.measurement.ResultReliabilityPolicy
 import com.handmeasure.measurement.ScaleCalibrator
 import com.handmeasure.measurement.TableRingSizeMapper
 import com.handmeasure.protocol.CaptureProtocols
-import com.handmeasure.protocol.ProtocolStepRole
-import com.handmeasure.protocol.role
 import com.handmeasure.vision.CardDetection
 import com.handmeasure.vision.HandDetection
 import com.handmeasure.vision.HandLandmarkEngine
@@ -66,12 +58,20 @@ class HandMeasureCoordinator(
 ) {
     private val protocolSteps = CaptureProtocols.steps(config.protocol).associateBy { it.step }
     private val stateMachine = HandMeasureStateMachine(config.qualityThresholds, ProtocolGuides.steps(config.protocol))
-    private val ringSizeMapper = TableRingSizeMapper()
     private var previousStep = stateMachine.currentStep().step
 
     private val frameSignalEstimator = FrameSignalEstimator()
     private val poseGuidanceHintDecider = PoseGuidanceHintDecider()
     private val debugFrameAnnotator = DebugFrameAnnotator()
+    private val fingerMeasurementPort = OpenCvSessionFingerMeasurementPort(fingerMeasurementEngine)
+    private val ringSizeMapper = TableRingSizeMapper()
+    private val resultAssembler =
+        MeasurementResultAssembler(
+            config = config,
+            fingerMeasurementFusion = fingerMeasurementFusion,
+            reliabilityPolicy = reliabilityPolicy,
+            ringSizeMapper = ringSizeMapper,
+        )
     private val sessionProcessor =
         MeasurementSessionProcessor(
             config = config,
@@ -79,7 +79,7 @@ class HandMeasureCoordinator(
             referenceCardDetector = referenceCardDetector,
             poseClassifier = poseClassifier,
             scaleCalibrator = scaleCalibrator,
-            fingerMeasurementEngine = fingerMeasurementEngine,
+            fingerMeasurementPort = fingerMeasurementPort,
             frameSignalEstimator = frameSignalEstimator,
             frameAnnotator = debugFrameAnnotator,
             poseTargets = protocolSteps.mapValues { it.value.poseTarget },
@@ -183,77 +183,7 @@ class HandMeasureCoordinator(
         val snapshot = stateMachine.snapshot()
         val stepResults = snapshot.completedSteps.sortedBy { it.step.ordinal }
         val processing = sessionProcessor.process(stepResults)
-        val warnings = processing.warnings.toMutableSet()
-
-        val fused = fingerMeasurementFusion.fuse(processing.stepMeasurements)
-        warnings += fused.warnings
-
-        val reliability =
-            reliabilityPolicy.assess(
-                fused = fused,
-                stepMeasurements = processing.stepMeasurements,
-                calibrationStatus = processing.calibrationStatus,
-                existingWarnings = warnings,
-            )
-        val ringSize = ringSizeMapper.nearestForDiameter(config.ringSizeTable, fused.equivalentDiameterMm)
-        val captured =
-            snapshot.completedSteps.map {
-                CapturedStepInfo(
-                    step = it.step,
-                    score = it.qualityScore,
-                    poseScore = it.poseScore,
-                    cardScore = it.cardScore,
-                    handScore = it.handScore,
-                )
-            }
-
-        val sessionDiagnostics =
-            SessionDiagnostics(
-                stepDiagnostics = processing.stepDiagnostics,
-                fusedDiagnostics =
-                    FusedDiagnostics(
-                        widthMm = fused.widthMm,
-                        thicknessMm = fused.thicknessMm,
-                        circumferenceMm = fused.circumferenceMm,
-                        equivalentDiameterMm = fused.equivalentDiameterMm,
-                        suggestedRingSizeLabel = ringSize.label,
-                        finalConfidence = fused.confidenceScore,
-                        warningReasons = reliability.warnings.map { it.name },
-                        perStepResidualsMm = fused.perStepResidualsMm,
-                        resultMode = reliability.resultMode,
-                        qualityLevel = reliability.qualityLevel,
-                        retryRecommended = reliability.retryRecommended,
-                        calibrationStatus = processing.calibrationStatus,
-                        measurementSources = reliability.measurementSources,
-                    ),
-            )
-
-        val result =
-            HandMeasureResult(
-                targetFinger = config.targetFinger,
-                fingerWidthMm = fused.widthMm,
-                fingerThicknessMm = fused.thicknessMm,
-                estimatedCircumferenceMm = fused.circumferenceMm,
-                equivalentDiameterMm = fused.equivalentDiameterMm,
-                suggestedRingSizeLabel = ringSize.label,
-                confidenceScore = fused.confidenceScore.coerceIn(0f, 1f),
-                warnings = reliability.warnings,
-                capturedSteps = captured,
-                resultMode = reliability.resultMode,
-                qualityLevel = reliability.qualityLevel,
-                retryRecommended = reliability.retryRecommended,
-                calibrationStatus = processing.calibrationStatus,
-                measurementSources = reliability.measurementSources,
-                debugMetadata =
-                    DebugMetadata(
-                        mmPerPxX = processing.bestScaleMmPerPxX,
-                        mmPerPxY = processing.bestScaleMmPerPxY,
-                        frontalWidthPx = processing.frontalWidthPx,
-                        thicknessSamplesMm = processing.thicknessSamples,
-                        rawNotes = processing.debugNotes + processing.calibrationNotes + fused.debugNotes,
-                        sessionDiagnostics = sessionDiagnostics,
-                    ),
-            )
+        val result = resultAssembler.assemble(snapshot, processing)
 
         debugSessionExporter.export(result, processing.overlays)
         return result

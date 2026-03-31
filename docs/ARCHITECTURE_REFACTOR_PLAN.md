@@ -92,3 +92,34 @@ New unit tests in `:handmeasure-core`:
 
 - Added core tests for session finalization logic:
   - `MeasurementSessionFinalizationUseCaseTest`
+
+## Phase 3 update: session processor boundary tightening
+
+### New core contracts/use cases
+
+- Added `com.handmeasure.core.session.MeasurementSessionProcessingUseCase`
+- Added `com.handmeasure.core.session.MeasurementSessionProcessingRequest`
+- Added `com.handmeasure.core.session.SessionFingerMeasurementPort`
+
+### Android adapters added in `:HandMeasure`
+
+- Added `com.handmeasure.coordinator.AndroidSessionProcessingMapper`
+  - maps `StepCandidate` and thresholds into `MeasurementSessionProcessingRequest`
+  - maps core `SessionProcessingResult` back to existing Android `SessionProcessingOutput`
+- Added `com.handmeasure.measurement.OpenCvSessionFingerMeasurementPort`
+  - Android/OpenCV implementation of `SessionFingerMeasurementPort`
+  - keeps `Bitmap`/MediaPipe hand detection/OpenCV measurement on Android side
+- `MeasurementSessionProcessor` is now an adapter invoking core `MeasurementSessionProcessingUseCase`
+
+### Coordinator simplification
+
+- Added `com.handmeasure.coordinator.MeasurementResultAssembler` to host result assembly domain logic
+- `HandMeasureCoordinator.finalizeResult()` now delegates session post-processing composition to this assembler
+
+### Remaining Android-bound hotspots
+
+- `AndroidSessionStepAnalyzer` still performs:
+  - frame decode to `Bitmap`
+  - MediaPipe hand/card inference and pose scoring
+  - OpenCV-based width measurement through Android port implementation
+- Public Parcelable API models remain Android-side (`HandMeasureConfig`, `HandMeasureResult`, diagnostics payloads)

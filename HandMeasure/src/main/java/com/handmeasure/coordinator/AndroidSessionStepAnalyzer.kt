@@ -3,20 +3,13 @@ package com.handmeasure.coordinator
 import android.graphics.BitmapFactory
 import com.handmeasure.api.CaptureStep
 import com.handmeasure.api.HandMeasureConfig
-import com.handmeasure.measurement.FingerMeasurementEngine
-import com.handmeasure.measurement.FingerWidthMeasurement
 import com.handmeasure.measurement.MetricScale
 import com.handmeasure.measurement.ScaleCalibrator
 import com.handmeasure.measurement.ScaleCalibrationResult
-import com.handmeasure.measurement.WidthMeasurementSource
 import com.handmeasure.vision.HandLandmarkEngine
 import com.handmeasure.vision.PoseClassifier
 import com.handmeasure.vision.ReferenceCardDetector
-import com.handmeasure.core.measurement.CalibrationStatus as CoreCalibrationStatus
-import com.handmeasure.core.measurement.CaptureStep as CoreCaptureStep
-import com.handmeasure.core.measurement.WidthMeasurementSource as CoreWidthMeasurementSource
 import com.handmeasure.core.session.SessionCardDiagnostics
-import com.handmeasure.core.session.SessionFingerMeasurement
 import com.handmeasure.core.session.SessionOverlayFrame
 import com.handmeasure.core.session.SessionScale
 import com.handmeasure.core.session.SessionScaleDiagnostics
@@ -31,7 +24,7 @@ internal class AndroidSessionStepAnalyzer(
     private val referenceCardDetector: ReferenceCardDetector,
     private val poseClassifier: PoseClassifier,
     private val scaleCalibrator: ScaleCalibrator,
-    private val fingerMeasurementEngine: FingerMeasurementEngine,
+    private val fingerMeasurementPort: AndroidFingerMeasurementPort,
     private val frameSignalEstimator: FrameSignalEstimator,
     private val frameAnnotator: DebugFrameAnnotator,
     private val poseTargets: Map<CaptureStep, PoseTarget>,
@@ -66,12 +59,7 @@ internal class AndroidSessionStepAnalyzer(
                     )
             val measurement =
                 hand?.let { detectedHand ->
-                    fingerMeasurementEngine.measureVisibleWidth(
-                        bitmap = bitmap,
-                        handDetection = detectedHand,
-                        targetFinger = config.targetFinger,
-                        scale = effectiveScale,
-                    )
+                    fingerMeasurementPort.measureVisibleWidth(bitmap, detectedHand, config.targetFinger, effectiveScale)
                 }
             val overlayFrame =
                 if (config.debugOverlayEnabled) {
@@ -97,7 +85,7 @@ internal class AndroidSessionStepAnalyzer(
                         )
                     },
                 scaleResult = scaleResult?.toCoreScaleResult(),
-                measurement = measurement?.toCoreMeasurement(),
+                measurement = measurement,
                 overlayFrame = overlayFrame,
             )
         } finally {
@@ -118,43 +106,4 @@ internal class AndroidSessionStepAnalyzer(
                     notes = diagnostics.notes,
                 ),
         )
-
-    private fun com.handmeasure.api.CalibrationStatus.toCoreCalibrationStatus(): CoreCalibrationStatus =
-        when (this) {
-            com.handmeasure.api.CalibrationStatus.CALIBRATED -> CoreCalibrationStatus.CALIBRATED
-            com.handmeasure.api.CalibrationStatus.DEGRADED -> CoreCalibrationStatus.DEGRADED
-            com.handmeasure.api.CalibrationStatus.MISSING_REFERENCE -> CoreCalibrationStatus.MISSING_REFERENCE
-        }
-
-    private fun FingerWidthMeasurement.toCoreMeasurement(): SessionFingerMeasurement =
-        SessionFingerMeasurement(
-            widthPx = widthPx,
-            widthMm = widthMm,
-            usedFallback = usedFallback,
-            source = source.toCoreWidthMeasurementSource(),
-            validSamples = validSamples,
-            widthVarianceMm = widthVarianceMm,
-            sampledWidthsMm = sampledWidthsMm,
-        )
-
-    private fun WidthMeasurementSource.toCoreWidthMeasurementSource(): CoreWidthMeasurementSource =
-        when (this) {
-            WidthMeasurementSource.EDGE_PROFILE -> CoreWidthMeasurementSource.EDGE_PROFILE
-            WidthMeasurementSource.LANDMARK_HEURISTIC -> CoreWidthMeasurementSource.LANDMARK_HEURISTIC
-            WidthMeasurementSource.DEFAULT_HEURISTIC -> CoreWidthMeasurementSource.DEFAULT_HEURISTIC
-        }
-
-    private fun CoreCaptureStep.toApiStep(): CaptureStep =
-        when (this) {
-            CoreCaptureStep.FRONT_PALM -> CaptureStep.FRONT_PALM
-            CoreCaptureStep.LEFT_OBLIQUE -> CaptureStep.LEFT_OBLIQUE
-            CoreCaptureStep.RIGHT_OBLIQUE -> CaptureStep.RIGHT_OBLIQUE
-            CoreCaptureStep.UP_TILT -> CaptureStep.UP_TILT
-            CoreCaptureStep.DOWN_TILT -> CaptureStep.DOWN_TILT
-            CoreCaptureStep.BACK_OF_HAND -> CaptureStep.BACK_OF_HAND
-            CoreCaptureStep.LEFT_OBLIQUE_DORSAL -> CaptureStep.LEFT_OBLIQUE_DORSAL
-            CoreCaptureStep.RIGHT_OBLIQUE_DORSAL -> CaptureStep.RIGHT_OBLIQUE_DORSAL
-            CoreCaptureStep.UP_TILT_DORSAL -> CaptureStep.UP_TILT_DORSAL
-            CoreCaptureStep.DOWN_TILT_DORSAL -> CaptureStep.DOWN_TILT_DORSAL
-        }
 }
