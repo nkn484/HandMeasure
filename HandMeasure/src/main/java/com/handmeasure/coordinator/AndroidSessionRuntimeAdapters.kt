@@ -3,7 +3,6 @@ package com.handmeasure.coordinator
 import android.graphics.Bitmap
 import com.handmeasure.api.CaptureStep
 import com.handmeasure.api.TargetFinger
-import com.handmeasure.measurement.MetricScale
 import com.handmeasure.measurement.ScaleCalibrator
 import com.handmeasure.vision.CardDetection
 import com.handmeasure.vision.HandDetection
@@ -13,6 +12,7 @@ import com.handmeasure.vision.ReferenceCardDetector
 import com.handmeasure.core.measurement.CaptureStep as CoreCaptureStep
 import com.handmeasure.core.session.SessionCardDiagnostics
 import com.handmeasure.core.session.SessionFingerMeasurement
+import com.handmeasure.core.session.SessionFingerMeasurementRequest
 import com.handmeasure.core.session.SessionScale
 import com.handmeasure.core.session.SessionScaleDiagnostics
 import com.handmeasure.core.session.SessionScaleResult
@@ -147,14 +147,12 @@ internal class AndroidFingerRuntimeAdapter(
         scale: SessionScale,
     ): SessionFingerMeasurement? =
         fingerMeasurementPort.measureVisibleWidth(
-            frame = frame,
-            hand = hand,
-            targetFinger = targetFinger,
-            scale =
-                MetricScale(
-                    mmPerPxX = scale.mmPerPxX,
-                    mmPerPxY = scale.mmPerPxY,
-                ),
+            SessionFingerMeasurementRequest(
+                frame = frame,
+                hand = hand,
+                targetFinger = targetFinger,
+                scale = scale,
+            ),
         )
 }
 

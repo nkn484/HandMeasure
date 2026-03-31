@@ -180,3 +180,33 @@ New unit tests in `:handmeasure-core`:
 
 - Core contracts/orchestration stay unchanged in this phase.
 - Android runtime remains Android-only by design (Bitmap + MediaPipe/OpenCV + debug overlay rendering), but now in smaller testable units.
+
+## Phase 6 update: finger measurement execution boundary cleanup
+
+### Core-side measurement contract refinement
+
+- `SessionFingerMeasurementPort` was refined to take a single core request model:
+  - `SessionFingerMeasurementRequest`
+  - includes `SessionScale` directly in the core contract
+- This removes executor-scale leakage from higher-level Android runtime/session code.
+
+### Android/OpenCV measurement isolation improvements
+
+- `OpenCvSessionFingerMeasurementPort` now focuses on contract bridging only.
+- Added explicit OpenCV execution boundary classes:
+  - `OpenCvFingerMeasurementRequest`
+  - `OpenCvFingerMeasurementExecutor`
+  - `OpenCvFingerMeasurementEngineExecutor`
+  - `OpenCvFingerMeasurementMapper`
+- `FingerMeasurementEngine` remains Android/OpenCV-only implementation by design in this phase.
+
+### Runtime/session impact
+
+- `AndroidFingerRuntimeAdapter` now depends on core measurement request contract (`SessionFingerMeasurementRequest`) and no longer performs scale-type conversion.
+- Higher-level runtime/session composition continues to use core models (`SessionScale` / `SessionFingerMeasurement`) and does not depend on `MetricScale`.
+
+### Tests
+
+- Added `OpenCvSessionFingerMeasurementPortTest` to validate:
+  - request/result delegation through execution boundary
+  - scale/source mapping behavior from OpenCV layer to core models

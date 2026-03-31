@@ -1,10 +1,12 @@
 package com.handmeasure.core.session
 
-fun interface SessionFingerMeasurementPort<FrameT, HandT, TargetFingerT, ScaleT> {
-    fun measureVisibleWidth(
-        frame: FrameT,
-        hand: HandT,
-        targetFinger: TargetFingerT,
-        scale: ScaleT,
-    ): SessionFingerMeasurement
+data class SessionFingerMeasurementRequest<FrameT, HandT, TargetFingerT>(
+    val frame: FrameT,
+    val hand: HandT,
+    val targetFinger: TargetFingerT,
+    val scale: SessionScale,
+)
+
+fun interface SessionFingerMeasurementPort<FrameT, HandT, TargetFingerT> {
+    fun measureVisibleWidth(request: SessionFingerMeasurementRequest<FrameT, HandT, TargetFingerT>): SessionFingerMeasurement
 }
