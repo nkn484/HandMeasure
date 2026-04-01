@@ -7,6 +7,8 @@ import com.handmeasure.flow.CaptureUiState
 import com.handmeasure.flow.HandMeasureStateMachine
 import com.handmeasure.flow.ProtocolGuides
 import com.handmeasure.flow.StepCandidate
+import com.handmeasure.engine.MeasurementEngine
+import com.handmeasure.engine.compat.MeasurementEngineApiMapper
 import com.handmeasure.measurement.FingerMeasurementFusion
 import com.handmeasure.measurement.FrameQualityInput
 import com.handmeasure.measurement.FrameQualityScorer
@@ -58,29 +60,25 @@ class HandMeasureCoordinator(
     private val protocolSteps = CaptureProtocols.steps(config.protocol).associateBy { it.step }
     private val stateMachine = HandMeasureStateMachine(config.qualityThresholds, ProtocolGuides.steps(config.protocol))
     private var previousStep = stateMachine.currentStep().step
+    private val engineApiMapper = MeasurementEngineApiMapper()
 
     private val frameSignalEstimator = FrameSignalEstimator()
     private val poseGuidanceHintDecider = PoseGuidanceHintDecider()
     private val debugFrameAnnotator = DebugFrameAnnotator()
-    private val ringSizeMapper = TableRingSizeMapper()
-    private val resultAssembler =
-        MeasurementResultAssembler(
-            config = config,
-            fingerMeasurementFusion = fingerMeasurementFusion,
-            reliabilityPolicy = reliabilityPolicy,
-            ringSizeMapper = ringSizeMapper,
-        )
-    private val sessionProcessor =
-        MeasurementSessionProcessor(
-            config = config,
+    private val measurementEngine =
+        MeasurementEngine(
+            config = engineApiMapper.toEngineConfig(config),
             handLandmarkEngine = handLandmarkEngine,
             referenceCardDetector = referenceCardDetector,
             poseClassifier = poseClassifier,
             scaleCalibrator = scaleCalibrator,
             fingerMeasurementPort = fingerMeasurementPort,
+            fingerMeasurementFusion = fingerMeasurementFusion,
+            reliabilityPolicy = reliabilityPolicy,
+            ringSizeMapper = TableRingSizeMapper(),
             frameSignalEstimator = frameSignalEstimator,
             frameAnnotator = debugFrameAnnotator,
-            poseTargets = protocolSteps.mapValues { it.value.poseTarget },
+            mapper = engineApiMapper,
         )
     private val debugSessionExporter = DebugSessionExporter(config, debugExportDirProvider)
 
@@ -179,11 +177,11 @@ class HandMeasureCoordinator(
 
     fun finalizeResult(): HandMeasureResult {
         val snapshot = stateMachine.snapshot()
-        val stepResults = snapshot.completedSteps.sortedBy { it.step.ordinal }
-        val processing = sessionProcessor.process(stepResults)
-        val result = resultAssembler.assemble(snapshot, processing)
+        val stepResults = snapshot.completedSteps.sortedBy { it.step.ordinal }.map(engineApiMapper::toEngineStepCandidate)
+        val processing = measurementEngine.process(stepResults)
+        val result = engineApiMapper.toApiResult(processing.result)
 
-        debugSessionExporter.export(result, processing.overlays)
+        debugSessionExporter.export(result, processing.overlays.map(engineApiMapper::toApiOverlay))
         return result
     }
 }

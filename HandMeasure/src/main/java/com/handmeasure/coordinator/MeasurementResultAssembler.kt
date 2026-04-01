@@ -7,6 +7,7 @@ import com.handmeasure.api.HandMeasureConfig
 import com.handmeasure.api.HandMeasureResult
 import com.handmeasure.api.SessionDiagnostics
 import com.handmeasure.flow.CaptureUiState
+import com.handmeasure.flow.StepCandidate
 import com.handmeasure.measurement.FingerMeasurementFusion
 import com.handmeasure.measurement.ResultReliabilityPolicy
 import com.handmeasure.measurement.TableRingSizeMapper
@@ -19,6 +20,11 @@ internal class MeasurementResultAssembler(
 ) {
     fun assemble(
         snapshot: CaptureUiState,
+        processing: SessionProcessingOutput,
+    ): HandMeasureResult = assemble(snapshot.completedSteps, processing)
+
+    fun assemble(
+        completedSteps: List<StepCandidate>,
         processing: SessionProcessingOutput,
     ): HandMeasureResult {
         val warnings = processing.warnings.toMutableSet()
@@ -34,7 +40,7 @@ internal class MeasurementResultAssembler(
             )
         val ringSize = ringSizeMapper.nearestForDiameter(config.ringSizeTable, fused.equivalentDiameterMm)
         val captured =
-            snapshot.completedSteps.map {
+            completedSteps.map {
                 CapturedStepInfo(
                     step = it.step,
                     score = it.qualityScore,
