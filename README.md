@@ -41,6 +41,7 @@
 ## Modules
 
 - `:handmeasure-core`: platform-neutral session/runtime orchestration + measurement policies/contracts
+- `:handtryon-core`: platform-neutral try-on session/placement policies
 - `:HandMeasure`: reusable Android library module
 - `:HandTryOn`: try-on library module (domain/core/render/realtime/validation)
 - `:app`: host demo app
@@ -62,12 +63,11 @@
 
 ## HandTryOn architecture path
 
-- Current `:HandTryOn` keeps realtime/render/runtime integration in one Android module.
-- The next refactor path mirrors HandMeasure:
-  - Android/public compatibility entry points
-  - internal/headless try-on engine-facing layer
-  - future portable `:handtryon-core` extraction for pure session/placement policy logic
-- Concrete staging plan and class candidates are documented in `docs/HANDTRYON_REFACTOR_PATH.md`.
+- `:HandTryOn` now has an internal `TryOnEngine` boundary for session resolution orchestration.
+- Android/runtime/render concerns remain in `:HandTryOn` (CameraX analyzer, bitmap rendering, Compose overlay).
+- First portable extraction now lives in `:handtryon-core` (session resolver policy, temporal smoothing policy, placement validation policy, anchor factory, Android-free models).
+- `TryOnRenderResult` remains Android-side because it carries `Bitmap`.
+- Detailed status and next steps are tracked in `docs/HANDTRYON_REFACTOR_PATH.md`.
 
 ## Public API
 

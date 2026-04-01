@@ -1,24 +1,42 @@
-# HandTryOn module
+# HandTryOn Module
 
-`HandTryOn` là module try-on nhẫn tách riêng khỏi `HandMeasure`, tập trung demo realtime 2D/2.5D ổn định trên điện thoại.
+`HandTryOn` provides real-time ring overlay for Android preview and export flows.
 
-## Mục tiêu
+## Goals
 
-- Không phụ thuộc cứng vào measurement.
-- Chạy được với 3 mode: `Measured`, `LandmarkOnly`, `Manual`.
-- Ưu tiên pipeline nhẹ, dễ fallback và dễ validate.
+- Keep try-on independent from `HandMeasureContract`.
+- Support three runtime modes: `Measured`, `LandmarkOnly`, `Manual`.
+- Keep realtime behavior lightweight with deterministic fallback paths.
 
-## Package chính
+## Current package areas (`:HandTryOn`)
 
-- `com.handtryon.domain`: model/contract (`RingAssetSource`, `TryOnSession`, `FingerAnchor`, ...)
-- `com.handtryon.core`: provider abstraction + resolver (`HandPoseProvider`, `FingerAnchorProvider`, `OptionalMeasurementProvider`, `TryOnSessionResolver`)
-- `com.handtryon.render`: renderer + mapping (`StableRingOverlayRenderer`, `PreviewCoordinateMapper`)
-- `com.handtryon.realtime`: analyzer realtime (`TryOnRealtimeAnalyzer`, `RgbaFrameBitmapConverter`)
-- `com.handtryon.validation`: validator + runtime metrics
-- `com.handtryon.data`: asset loader/repository abstraction
+- `com.handtryon.domain`
+- `com.handtryon.core`
+- `com.handtryon.engine`
+- `com.handtryon.render`
+- `com.handtryon.realtime`
+- `com.handtryon.validation`
+- `com.handtryon.data`
+- `com.handtryon.ui`
 
-## Dependency nguyên tắc
+## Architecture status (source truth)
 
-- `HandTryOn` không import `HandMeasureContract`.
-- Measurement được đưa vào qua `MeasurementSnapshot` và `OptionalMeasurementProvider`.
-- App host tự map dữ liệu landmark/measurement từ nguồn bất kỳ sang model của `HandTryOn`.
+- **Android/public compatibility layer (`:HandTryOn`)**
+  - CameraX analyzer/runtime (`TryOnRealtimeAnalyzer`, `RgbaFrameBitmapConverter`)
+  - bitmap rendering output (`StableRingOverlayRenderer`, `TryOnRenderResult`)
+  - overlay/UI integration (`TryOnOverlay`)
+- **Internal/headless engine-facing layer (`:HandTryOn`)**
+  - `TryOnEngine` orchestration entry
+  - internal engine request/result models
+  - mapper + compatibility adapter (`TryOnEngineDomainMapper`, `TryOnSessionResolver`)
+- **Portable policy layer (`:handtryon-core`)**
+  - `TryOnSessionResolverPolicy`
+  - `TemporalPlacementSmootherPolicy`
+  - `PlacementValidationPolicy`
+  - `DefaultFingerAnchorFactory`
+  - Android-free try-on session/placement models
+
+## Boundary notes
+
+- `TryOnRenderResult` remains Android-side because it carries `Bitmap`.
+- `:handtryon-core` contains no `Bitmap`, `ImageProxy`, CameraX, Compose, or Android UI classes.

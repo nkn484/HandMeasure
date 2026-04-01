@@ -322,3 +322,26 @@ New unit tests in `:handmeasure-core`:
 - Added concrete architecture preparation plan in `docs/HANDTRYON_REFACTOR_PATH.md`.
 - The next Try-on phase now has explicit target layers and class candidates for future `:handtryon-core` extraction.
 - No broad Try-on rewrite was done in this phase.
+
+## Phase 11 update: HandTryOn engine boundary + first core extraction
+
+### New TryOn engine-facing boundary in `:HandTryOn`
+
+- Added internal `TryOnEngine` facade and engine request/result models.
+- `TryOnSessionResolver` now acts as a compatibility adapter delegating to `TryOnEngine`.
+- Added `TryOnEngineDomainMapper` for domain <-> engine/core model adaptation.
+
+### New portable module
+
+- Added `:handtryon-core` for Android-free try-on logic and models.
+- Extracted core-ready logic:
+  - `TryOnSessionResolverPolicy`
+  - `TemporalPlacementSmootherPolicy`
+  - `PlacementValidationPolicy`
+  - `DefaultFingerAnchorFactory`
+
+### HandTryOn compatibility behavior
+
+- Existing Android runtime/render/UI flow remains in `:HandTryOn`.
+- `TryOnRenderResult` remains Android-side by design because it contains `Bitmap`.
+- Existing mode/fallback/smoothing/validation semantics are preserved via delegation adapters.

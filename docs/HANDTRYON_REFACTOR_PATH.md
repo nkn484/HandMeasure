@@ -1,79 +1,52 @@
-# HandTryOn Refactor Path (Preparation)
+# HandTryOn Refactor Path (Current Status)
 
-## Scope of this document
+## What is now implemented
 
-This is a concrete preparation map for the next HandTryOn refactor phase so HandTryOn follows the same architecture direction as HandMeasure:
+### 1) Internal/headless engine-facing layer in `:HandTryOn`
 
-- Android/public compatibility layer
-- internal/headless engine-facing layer
-- portable/core orchestration layer
+- Added internal `TryOnEngine` (`com.handtryon.engine.TryOnEngine`).
+- Added internal engine request/result models (`com.handtryon.engine.model`).
+- Added mapper/adaptation layer (`com.handtryon.engine.compat.TryOnEngineDomainMapper`).
+- Existing public compatibility entry `TryOnSessionResolver` now delegates to `TryOnEngine`.
 
-This document does **not** claim that the split is already complete in source.
+### 2) First portable extraction in `:handtryon-core`
 
-## Current structure (source truth)
+- Added new module `:handtryon-core`.
+- Extracted Android-free models and policy logic:
+  - `TryOnSessionResolverPolicy`
+  - `TemporalPlacementSmootherPolicy`
+  - `PlacementValidationPolicy`
+  - `DefaultFingerAnchorFactory`
 
-`HandTryOn` is currently one Android module with these package areas:
+### 3) Compatibility adapters in `:HandTryOn`
 
-- `com.handtryon.domain`
-- `com.handtryon.core`
-- `com.handtryon.render`
-- `com.handtryon.realtime`
-- `com.handtryon.validation`
-- `com.handtryon.data`
+- `DefaultFingerAnchorProvider`, `TemporalPlacementSmoother`, and `PlacementValidator` now delegate to `:handtryon-core` logic through mapper-based adapters.
 
-## Target layering for next phase
+## Current boundaries
 
-### 1) Android/public compatibility layer (`:HandTryOn`)
+- **Android/public compatibility (`:HandTryOn`)**
+  - realtime CameraX analyzer
+  - bitmap-based overlay renderer
+  - Compose overlay integration
+  - render output model carrying `Bitmap` (`TryOnRenderResult`)
+- **Engine-facing internal (`:HandTryOn`)**
+  - engine facade + request/result + mapper
+  - compatibility wrappers for existing API usage
+- **Portable core (`:handtryon-core`)**
+  - session/mode/fallback policy
+  - smoothing/validation policy
+  - anchor extraction policy
+  - Android-free session/placement models
 
-Owns Android-specific integration concerns:
+## What intentionally remains Android-only
 
-- CameraX `ImageAnalysis` and `ImageProxy` analyzer path (`TryOnRealtimeAnalyzer`)
-- frame conversion (`RgbaFrameBitmapConverter`)
-- bitmap rendering integration/output (`TryOnRenderResult` currently holds `Bitmap`)
-- any Activity/Compose/public Android entry surface
+- `TryOnRealtimeAnalyzer` / `RgbaFrameBitmapConverter` (CameraX + `ImageProxy`)
+- `StableRingOverlayRenderer` and preview/export rendering (`Bitmap`, `Canvas`)
+- `TryOnRenderResult` (contains `Bitmap`)
+- Compose overlay UI (`TryOnOverlay`)
 
-### 2) Internal/headless engine-facing layer (`:HandTryOn`, first extraction step)
+## Next phase recommendation
 
-Owns session orchestration and API boundary for try-on invocation:
-
-- `TryOnEngine` facade (internal at first)
-- internal request/result/session models
-- adapter wiring from Android runtime signals to engine inputs
-- compatibility adapters to keep current Android flow stable
-
-### 3) Future portable core layer (`:handtryon-core`, later phase)
-
-Candidate pure logic to move out once contracts are stabilized:
-
-- mode resolution + fallback policy from `TryOnSessionResolver`
-- temporal smoothing policy from `TemporalPlacementSmoother`
-- anchor/placement math with Android-free models
-- placement validation heuristics currently in `validation` package where Android is not required
-
-## Existing classes that are strongest candidates for future `:handtryon-core`
-
-- `com.handtryon.core.TryOnSessionResolver`
-- `com.handtryon.core.TemporalPlacementSmoother`
-- `com.handtryon.core.DefaultFingerAnchorProvider` (after model boundary cleanup)
-- `com.handtryon.validation.PlacementValidator` (if kept Android-free)
-- domain models in `com.handtryon.domain` that do not require `Bitmap`
-
-## Models that need boundary cleanup before extraction
-
-Current mixed model to isolate from core contracts:
-
-- `TryOnRenderResult` includes `android.graphics.Bitmap`
-
-Next-phase direction:
-
-- keep Android render output models in compatibility layer
-- introduce engine-facing render/session result models without `Bitmap`
-- map engine-facing results to Android render outputs in adapter layer
-
-## Recommended next phase (implementation order)
-
-1. Define internal try-on engine request/result/session models (Android-free).
-2. Add internal `TryOnEngine` facade using those models.
-3. Adapt current Android realtime/render path to call the facade through mappers/adapters.
-4. Move pure resolver/smoothing/validation policy logic behind core-ready contracts.
-5. Extract first `:handtryon-core` module with minimal, verified pure logic.
+1. Move renderer-adjacent non-Android math helpers behind engine-facing contracts where beneficial.
+2. Introduce engine-facing render/session result models to reduce direct domain-model coupling.
+3. Keep `TryOnRenderResult` as Android compatibility output while expanding core portability.
