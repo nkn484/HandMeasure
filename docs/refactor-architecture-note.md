@@ -1,5 +1,11 @@
 # HandMeasure Refactor Architecture Note
 
+> Status note: this document captures an earlier coordinator-focused slice.
+> Current source-of-truth architecture and phase status live in:
+> - `docs/ARCHITECTURE_REFACTOR_PLAN.md`
+> - `docs/HANDTRYON_REFACTOR_PATH.md`
+> - `.github/workflows/android-ci.yml` (includes `:handmeasure-core:test`)
+
 ## Goals
 - Keep public API compatibility for `HandMeasureConfig`, `HandMeasureContract`, `HandMeasureResult`, and `RingSizeTable`.
 - Improve maintainability/testability by reducing `HandMeasureCoordinator` responsibilities.

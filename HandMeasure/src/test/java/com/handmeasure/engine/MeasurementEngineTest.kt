@@ -1,107 +1,85 @@
 package com.handmeasure.engine
 
 import com.google.common.truth.Truth.assertThat
-import com.handmeasure.api.CaptureStep
-import com.handmeasure.api.HandMeasureResult
-import com.handmeasure.api.HandMeasureWarning
-import com.handmeasure.api.MeasurementSource
-import com.handmeasure.api.QualityLevel
-import com.handmeasure.api.ResultMode
-import com.handmeasure.coordinator.DebugOverlayFrame
-import com.handmeasure.coordinator.SessionProcessingOutput
-import com.handmeasure.engine.compat.MeasurementEngineApiMapper
+import com.handmeasure.core.measurement.CalibrationStatus
+import com.handmeasure.core.measurement.CaptureStep
+import com.handmeasure.core.measurement.HandMeasureWarning
+import com.handmeasure.core.measurement.MeasurementSource
+import com.handmeasure.core.measurement.QualityLevel
+import com.handmeasure.core.measurement.ResultMode
+import com.handmeasure.engine.model.MeasurementEngineCapturedStepInfo
+import com.handmeasure.engine.model.MeasurementEngineOverlayFrame
+import com.handmeasure.engine.model.MeasurementEngineProcessingResult
+import com.handmeasure.engine.model.MeasurementEngineResult
 import com.handmeasure.engine.model.MeasurementEngineStepCandidate
-import com.handmeasure.flow.StepCandidate
-import com.handmeasure.measurement.StepMeasurement
-import com.handmeasure.measurement.WidthMeasurementSource
+import com.handmeasure.engine.model.MeasurementTargetFinger
 import org.junit.Test
 
 class MeasurementEngineTest {
     @Test
-    fun process_mapsCandidatesDelegatesAndReturnsEngineResult() {
-        val mapper = MeasurementEngineApiMapper()
-        val engineCandidate =
+    fun process_delegatesUsingInternalEngineModelsOnly() {
+        val stepCandidate =
             MeasurementEngineStepCandidate(
-                step = com.handmeasure.core.measurement.CaptureStep.FRONT_PALM,
+                step = CaptureStep.FRONT_PALM,
                 frameBytes = byteArrayOf(1, 2, 3),
                 qualityScore = 0.9f,
                 poseScore = 0.8f,
                 cardScore = 0.8f,
                 handScore = 0.9f,
             )
-        var processedStepCandidates: List<StepCandidate> = emptyList()
-        var assembledStepCandidates: List<StepCandidate> = emptyList()
-
+        var capturedCandidates: List<MeasurementEngineStepCandidate> = emptyList()
+        val expected =
+            MeasurementEngineProcessingResult(
+                result =
+                    MeasurementEngineResult(
+                        targetFinger = MeasurementTargetFinger.RING,
+                        fingerWidthMm = 18.0,
+                        fingerThicknessMm = 14.0,
+                        estimatedCircumferenceMm = 52.0,
+                        equivalentDiameterMm = 16.5,
+                        suggestedRingSizeLabel = "US 6",
+                        confidenceScore = 0.82f,
+                        warnings = listOf(HandMeasureWarning.CALIBRATION_WEAK),
+                        capturedSteps =
+                            listOf(
+                                MeasurementEngineCapturedStepInfo(
+                                    step = CaptureStep.FRONT_PALM,
+                                    score = 0.9f,
+                                    poseScore = 0.8f,
+                                    cardScore = 0.8f,
+                                    handScore = 0.9f,
+                                ),
+                            ),
+                        resultMode = ResultMode.HYBRID_ESTIMATE,
+                        qualityLevel = QualityLevel.MEDIUM,
+                        retryRecommended = false,
+                        calibrationStatus = CalibrationStatus.CALIBRATED,
+                        measurementSources = listOf(MeasurementSource.EDGE_PROFILE),
+                    ),
+                overlays = listOf(MeasurementEngineOverlayFrame(stepName = "FRONT_PALM", jpegBytes = byteArrayOf(9, 8, 7))),
+            )
         val engine =
             MeasurementEngine(
-                mapper = mapper,
-                sessionProcessor =
-                    MeasurementEngineSessionProcessorPort { stepResults ->
-                        processedStepCandidates = stepResults
-                        SessionProcessingOutput(
-                            warnings = emptySet(),
-                            stepMeasurements =
-                                listOf(
-                                    StepMeasurement(
-                                        step = CaptureStep.FRONT_PALM,
-                                        widthMm = 18.0,
-                                        confidence = 0.9f,
-                                        measurementSource = WidthMeasurementSource.EDGE_PROFILE,
-                                        usedFallback = false,
-                                    ),
-                                ),
-                            stepDiagnostics = emptyList(),
-                            bestScaleMmPerPxX = 0.1,
-                            bestScaleMmPerPxY = 0.1,
-                            calibrationStatus = com.handmeasure.api.CalibrationStatus.CALIBRATED,
-                            frontalWidthPx = 120.0,
-                            thicknessSamples = listOf(14.0),
-                            debugNotes = emptyList(),
-                            calibrationNotes = emptyList(),
-                            overlays = listOf(DebugOverlayFrame("FRONT_PALM", byteArrayOf(9, 8, 7))),
-                        )
-                    },
-                resultAssembler =
-                    MeasurementEngineResultAssemblerPort { completedSteps, _ ->
-                        assembledStepCandidates = completedSteps
-                        HandMeasureResult(
-                            targetFinger = com.handmeasure.api.TargetFinger.RING,
-                            fingerWidthMm = 18.0,
-                            fingerThicknessMm = 14.0,
-                            estimatedCircumferenceMm = 52.0,
-                            equivalentDiameterMm = 16.5,
-                            suggestedRingSizeLabel = "US 6",
-                            confidenceScore = 0.8f,
-                            warnings = listOf(HandMeasureWarning.CALIBRATION_WEAK),
-                            capturedSteps = emptyList(),
-                            resultMode = ResultMode.HYBRID_ESTIMATE,
-                            qualityLevel = QualityLevel.MEDIUM,
-                            retryRecommended = false,
-                            calibrationStatus = com.handmeasure.api.CalibrationStatus.CALIBRATED,
-                            measurementSources = listOf(MeasurementSource.EDGE_PROFILE),
-                        )
+                processingPort =
+                    MeasurementEngineProcessingPort { candidates ->
+                        capturedCandidates = candidates
+                        expected
                     },
             )
 
-        val result = engine.process(listOf(engineCandidate))
+        val result = engine.process(listOf(stepCandidate))
 
-        assertThat(processedStepCandidates).hasSize(1)
-        assertThat(processedStepCandidates.first().step).isEqualTo(CaptureStep.FRONT_PALM)
-        assertThat(assembledStepCandidates).hasSize(1)
-        assertThat(result.result.suggestedRingSizeLabel).isEqualTo("US 6")
-        assertThat(result.result.warnings).containsExactly(com.handmeasure.core.measurement.HandMeasureWarning.CALIBRATION_WEAK)
-        assertThat(result.overlays).hasSize(1)
-        assertThat(result.overlays.first().stepName).isEqualTo("FRONT_PALM")
+        assertThat(capturedCandidates).containsExactly(stepCandidate)
+        assertThat(result).isEqualTo(expected)
     }
 
     @Test
-    fun constructor_acceptsPortsOnly() {
+    fun constructor_acceptsProcessingPortOnly() {
         val constructor = MeasurementEngine::class.java.declaredConstructors.single()
         val parameterTypeNames = constructor.parameterTypes.map { it.name }
 
-        assertThat(parameterTypeNames).contains(MeasurementEngineSessionProcessorPort::class.java.name)
-        assertThat(parameterTypeNames).contains(MeasurementEngineResultAssemblerPort::class.java.name)
-        assertThat(parameterTypeNames).doesNotContain("com.handmeasure.vision.HandLandmarkEngine")
-        assertThat(parameterTypeNames).doesNotContain("com.handmeasure.coordinator.MeasurementSessionProcessor")
+        assertThat(parameterTypeNames).containsExactly(MeasurementEngineProcessingPort::class.java.name)
+        assertThat(parameterTypeNames).doesNotContain("com.handmeasure.api.HandMeasureResult")
+        assertThat(parameterTypeNames).doesNotContain("com.handmeasure.flow.StepCandidate")
     }
 }

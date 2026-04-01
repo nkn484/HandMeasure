@@ -8,8 +8,7 @@ import com.handmeasure.coordinator.MeasurementResultAssembler
 import com.handmeasure.coordinator.MeasurementSessionProcessor
 import com.handmeasure.coordinator.PoseTarget
 import com.handmeasure.engine.MeasurementEngine
-import com.handmeasure.engine.MeasurementEngineResultAssemblerPort
-import com.handmeasure.engine.MeasurementEngineSessionProcessorPort
+import com.handmeasure.engine.MeasurementEngineProcessingPort
 import com.handmeasure.engine.compat.MeasurementEngineApiMapper
 import com.handmeasure.engine.model.MeasurementEngineConfig
 import com.handmeasure.measurement.FingerMeasurementFusion
@@ -37,16 +36,15 @@ internal object AndroidMeasurementEngineFactory {
         frameSignalEstimator: FrameSignalEstimator = FrameSignalEstimator(),
         frameAnnotator: DebugFrameAnnotator = DebugFrameAnnotator(),
         mapper: MeasurementEngineApiMapper = MeasurementEngineApiMapper(),
-        sessionProcessorPort: MeasurementEngineSessionProcessorPort? = null,
-        resultAssemblerPort: MeasurementEngineResultAssemblerPort? = null,
+        processingPortOverride: MeasurementEngineProcessingPort? = null,
     ): MeasurementEngine {
         val apiConfig = mapper.toApiConfig(config)
         val poseTargets: Map<CaptureStep, PoseTarget> =
             CaptureProtocols.steps(apiConfig.protocol).associateBy { it.step }.mapValues { it.value.poseTarget }
-        val sessionProcessor =
-            sessionProcessorPort
+        val processingPort =
+            processingPortOverride
                 ?: run {
-                    val processor =
+                    val sessionProcessor =
                         MeasurementSessionProcessor(
                             config = apiConfig,
                             handLandmarkEngine = handLandmarkEngine,
@@ -58,26 +56,25 @@ internal object AndroidMeasurementEngineFactory {
                             frameAnnotator = frameAnnotator,
                             poseTargets = poseTargets,
                         )
-                    MeasurementEngineSessionProcessorPort { stepResults -> processor.process(stepResults) }
-                }
-        val resultAssembler =
-            resultAssemblerPort
-                ?: run {
-                    val assembler =
+                    val resultAssembler =
                         MeasurementResultAssembler(
                             config = apiConfig,
                             fingerMeasurementFusion = fingerMeasurementFusion,
                             reliabilityPolicy = reliabilityPolicy,
                             ringSizeMapper = ringSizeMapper,
                         )
-                    MeasurementEngineResultAssemblerPort { completedSteps, processing ->
-                        assembler.assemble(completedSteps, processing)
+                    MeasurementEngineProcessingPort { stepCandidates ->
+                        val completedSteps = stepCandidates.map(mapper::toApiStepCandidate)
+                        val processing = sessionProcessor.process(completedSteps)
+                        val apiResult = resultAssembler.assemble(completedSteps, processing)
+                        mapper.toEngineProcessingResult(
+                            result = apiResult,
+                            overlays = processing.overlays,
+                        )
                     }
                 }
         return MeasurementEngine(
-            sessionProcessor = sessionProcessor,
-            resultAssembler = resultAssembler,
-            mapper = mapper,
+            processingPort = processingPort,
         )
     }
 }

@@ -227,7 +227,7 @@ New unit tests in `:handmeasure-core`:
   - `OpenCvFingerMeasurementRequest`
   - `OpenCvFingerMeasurementExecutor`
   - `OpenCvFingerMeasurementEngineExecutor`
-  - `OpenCvFingerMeasurementMapper`
+  - `OpenCvSessionFingerMeasurementMapper`
 - `FingerMeasurementEngine` remains Android/OpenCV-only implementation by design in this phase.
 
 ### Runtime/session impact
@@ -255,7 +255,7 @@ New unit tests in `:handmeasure-core`:
 
 ### Scale conversion placement
 
-- Core `SessionScale` -> Android `MetricScale` conversion remains isolated inside `OpenCvSessionFingerMeasurementPort` mapper (`OpenCvFingerMeasurementMapper`).
+- Core `SessionScale` -> Android `MetricScale` conversion remains isolated inside `OpenCvSessionFingerMeasurementPort` mapper (`OpenCvSessionFingerMeasurementMapper`).
 - This keeps conversion and OpenCV execution details at the lowest adapter layer.
 
 ### Tests
@@ -272,7 +272,7 @@ New unit tests in `:handmeasure-core`:
 
 ### Conversion placement (kept)
 
-- `SessionScale` -> `MetricScale` conversion remains isolated in `OpenCvFingerMeasurementMapper` under `OpenCvSessionFingerMeasurementPort`.
+- `SessionScale` -> `MetricScale` conversion remains isolated in `OpenCvSessionFingerMeasurementMapper` under `OpenCvSessionFingerMeasurementPort`.
 - OpenCV request shaping/execution remains Android-only below the port boundary.
 
 ### Tests
@@ -284,9 +284,7 @@ New unit tests in `:handmeasure-core`:
 ### MeasurementEngine cleanup
 
 - `MeasurementEngine` is now a small facade that depends on:
-  - `MeasurementEngineSessionProcessorPort`
-  - `MeasurementEngineResultAssemblerPort`
-  - `MeasurementEngineApiMapper`
+  - `MeasurementEngineProcessingPort`
 - Direct Android-heavy construction was moved out of `MeasurementEngine`.
 
 ### Android composition extraction
@@ -310,3 +308,17 @@ New unit tests in `:handmeasure-core`:
 
 - Added `AndroidMeasurementEngineFactoryTest` for factory/engine boundary wiring.
 - `MeasurementEngineTest` now verifies constructor dependency boundary (ports-only facade).
+
+## Phase 10 update: public/internal model boundary completion + HandTryOn path prep
+
+### HandMeasure boundary status
+
+- `MeasurementEngine` now consumes internal engine-facing models only (`MeasurementEngineStepCandidate` -> `MeasurementEngineProcessingResult`).
+- Android/public models (`HandMeasureConfig`, `HandMeasureResult`, `RingSizeTable`) remain in compatibility boundary and are mapped via `MeasurementEngineApiMapper`.
+- Parcelable concerns remain in Android/public API entry points (`HandMeasureContract`, `HandMeasureActivity`).
+
+### HandTryOn preparation status
+
+- Added concrete architecture preparation plan in `docs/HANDTRYON_REFACTOR_PATH.md`.
+- The next Try-on phase now has explicit target layers and class candidates for future `:handtryon-core` extraction.
+- No broad Try-on rewrite was done in this phase.

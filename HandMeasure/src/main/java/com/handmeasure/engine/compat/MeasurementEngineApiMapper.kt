@@ -26,6 +26,7 @@ import com.handmeasure.engine.model.MeasurementEngineConfig
 import com.handmeasure.engine.model.MeasurementEngineDebugMetadata
 import com.handmeasure.engine.model.MeasurementEngineFusedDiagnostics
 import com.handmeasure.engine.model.MeasurementEngineOverlayFrame
+import com.handmeasure.engine.model.MeasurementEngineProcessingResult
 import com.handmeasure.engine.model.MeasurementEngineQualityThresholds
 import com.handmeasure.engine.model.MeasurementEngineResult
 import com.handmeasure.engine.model.MeasurementEngineSessionDiagnostics
@@ -144,6 +145,15 @@ internal class MeasurementEngineApiMapper {
         DebugOverlayFrame(
             stepName = overlay.stepName,
             jpegBytes = overlay.jpegBytes,
+        )
+
+    fun toEngineProcessingResult(
+        result: HandMeasureResult,
+        overlays: List<DebugOverlayFrame>,
+    ): MeasurementEngineProcessingResult =
+        MeasurementEngineProcessingResult(
+            result = toEngineResult(result),
+            overlays = overlays.map(::toEngineOverlay),
         )
 
     private fun QualityThresholds.toEngineThresholds(): MeasurementEngineQualityThresholds =

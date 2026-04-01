@@ -60,6 +60,15 @@
   - Core request/result contracts (`SessionFingerMeasurementRequest`, `SessionFingerMeasurementPort`)
   - Platform-neutral policies (fusion, reliability, ring-size mapping, quality scoring)
 
+## HandTryOn architecture path
+
+- Current `:HandTryOn` keeps realtime/render/runtime integration in one Android module.
+- The next refactor path mirrors HandMeasure:
+  - Android/public compatibility entry points
+  - internal/headless try-on engine-facing layer
+  - future portable `:handtryon-core` extraction for pure session/placement policy logic
+- Concrete staging plan and class candidates are documented in `docs/HANDTRYON_REFACTOR_PATH.md`.
+
 ## Public API
 
 - `HandMeasureConfig`

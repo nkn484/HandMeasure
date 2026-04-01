@@ -20,6 +20,8 @@ import com.handmeasure.api.RingSizeTable
 import com.handmeasure.api.SessionDiagnostics
 import com.handmeasure.api.StepDiagnostics
 import com.handmeasure.api.TargetFinger
+import com.handmeasure.coordinator.DebugOverlayFrame
+import com.handmeasure.flow.StepCandidate
 import com.handmeasure.core.measurement.HandMeasureWarning as CoreHandMeasureWarning
 import com.handmeasure.core.measurement.MeasurementSource as CoreMeasurementSource
 import com.handmeasure.core.measurement.ResultMode as CoreResultMode
@@ -184,5 +186,55 @@ class MeasurementEngineApiMapperTest {
         assertThat(apiResult.warnings).containsExactly(HandMeasureWarning.LOW_CARD_CONFIDENCE)
         assertThat(apiResult.measurementSources).containsExactly(MeasurementSource.FUSION_ESTIMATE)
         assertThat(apiResult.resultMode).isEqualTo(ResultMode.DIRECT_MEASUREMENT)
+    }
+
+    @Test
+    fun stepMapping_roundTripsBetweenApiAndEngineCandidates() {
+        val apiCandidate =
+            StepCandidate(
+                step = CaptureStep.FRONT_PALM,
+                frameBytes = byteArrayOf(7, 8, 9),
+                qualityScore = 0.88f,
+                poseScore = 0.81f,
+                cardScore = 0.79f,
+                handScore = 0.9f,
+                blurScore = 0.7f,
+                motionScore = 0.72f,
+                lightingScore = 0.68f,
+                confidencePenaltyReasons = listOf("LOW_LIGHTING"),
+            )
+
+        val engineCandidate = mapper.toEngineStepCandidate(apiCandidate)
+        val mappedBack = mapper.toApiStepCandidate(engineCandidate)
+
+        assertThat(mappedBack).isEqualTo(apiCandidate)
+    }
+
+    @Test
+    fun processingResultMapping_mapsApiResultAndOverlaysToEngineResult() {
+        val apiResult =
+            HandMeasureResult(
+                targetFinger = TargetFinger.RING,
+                fingerWidthMm = 18.1,
+                fingerThicknessMm = 14.2,
+                estimatedCircumferenceMm = 52.1,
+                equivalentDiameterMm = 16.6,
+                suggestedRingSizeLabel = "US 6",
+                confidenceScore = 0.83f,
+                warnings = listOf(HandMeasureWarning.CALIBRATION_WEAK),
+                capturedSteps = emptyList(),
+                resultMode = ResultMode.HYBRID_ESTIMATE,
+                qualityLevel = QualityLevel.MEDIUM,
+                retryRecommended = false,
+                calibrationStatus = CalibrationStatus.DEGRADED,
+                measurementSources = listOf(MeasurementSource.EDGE_PROFILE),
+            )
+        val overlays = listOf(DebugOverlayFrame(stepName = "FRONT_PALM", jpegBytes = byteArrayOf(1, 2, 3)))
+
+        val mapped = mapper.toEngineProcessingResult(apiResult, overlays)
+
+        assertThat(mapped.result.suggestedRingSizeLabel).isEqualTo("US 6")
+        assertThat(mapped.overlays).hasSize(1)
+        assertThat(mapped.overlays.first().stepName).isEqualTo("FRONT_PALM")
     }
 }
