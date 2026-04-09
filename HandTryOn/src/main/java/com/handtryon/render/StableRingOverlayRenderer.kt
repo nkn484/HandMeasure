@@ -12,11 +12,19 @@ import com.handtryon.domain.TryOnRenderResult
 import com.handtryon.render.model.TryOnRenderState
 import com.handtryon.validation.PlacementValidator
 
-class StableRingOverlayRenderer(
-    private val smoother: TemporalPlacementSmoother = TemporalPlacementSmoother(),
-    private val validator: PlacementValidator = PlacementValidator(),
-    private val occlusionMaskProvider: OcclusionMaskProvider? = null,
+class StableRingOverlayRenderer internal constructor(
+    private val smoother: TemporalPlacementSmoother,
+    private val validator: PlacementValidator,
+    private val occlusionMaskProvider: OcclusionMaskProvider?,
 ) {
+    constructor(
+        occlusionMaskProvider: OcclusionMaskProvider? = null,
+    ) : this(
+        smoother = TemporalPlacementSmoother(),
+        validator = PlacementValidator(),
+        occlusionMaskProvider = occlusionMaskProvider,
+    )
+
     private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val shadowPaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {

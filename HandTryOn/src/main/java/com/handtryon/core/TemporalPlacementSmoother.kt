@@ -4,7 +4,7 @@ import com.handtryon.coreengine.TemporalPlacementSmootherPolicy
 import com.handtryon.domain.RingPlacement
 import com.handtryon.engine.compat.TryOnEngineDomainMapper
 
-class TemporalPlacementSmoother(
+internal class TemporalPlacementSmoother(
     private val policy: TemporalPlacementSmootherPolicy = TemporalPlacementSmootherPolicy(),
     private val mapper: TryOnEngineDomainMapper = TryOnEngineDomainMapper(),
 ) {

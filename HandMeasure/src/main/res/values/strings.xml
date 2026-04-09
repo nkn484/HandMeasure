@@ -1,36 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="step_front_palm_title">Front palm</string>
-    <string name="step_left_oblique_title">Left oblique</string>
-    <string name="step_right_oblique_title">Right oblique</string>
-    <string name="step_up_tilt_title">Up tilt</string>
-    <string name="step_down_tilt_title">Down tilt</string>
+    <string name="step_front_palm_title">Lòng bàn tay chính diện</string>
+    <string name="step_left_oblique_title">Nghiêng trái</string>
+    <string name="step_right_oblique_title">Nghiêng phải</string>
+    <string name="step_up_tilt_title">Ngửa lên</string>
+    <string name="step_down_tilt_title">Úp xuống</string>
 
-    <string name="step_front_palm_hint">Place your palm toward the camera and keep the card near the ring finger.</string>
-    <string name="step_left_oblique_hint">Rotate your hand slightly left while keeping the ring finger visible.</string>
-    <string name="step_right_oblique_hint">Rotate your hand slightly right and keep the card in frame.</string>
-    <string name="step_up_tilt_hint">Tilt your hand upward to reveal finger thickness.</string>
-    <string name="step_down_tilt_hint">Tilt your hand downward for the final angle.</string>
+    <string name="step_front_palm_hint">Đưa lòng bàn tay về phía camera và giữ thẻ chuẩn gần ngón áp út.</string>
+    <string name="step_left_oblique_hint">Xoay tay nhẹ sang trái, vẫn giữ ngón áp út trong khung hình.</string>
+    <string name="step_right_oblique_hint">Xoay tay nhẹ sang phải và giữ thẻ chuẩn trong khung hình.</string>
+    <string name="step_up_tilt_hint">Ngửa tay lên để lộ rõ độ dày ngón tay.</string>
+    <string name="step_down_tilt_hint">Úp tay xuống để hoàn tất góc chụp cuối.</string>
 
-    <string name="step_back_of_hand_title">Back of hand</string>
-    <string name="step_back_of_hand_hint">Show the back of your hand with the card near the ring finger.</string>
-    <string name="step_left_oblique_dorsal_title">Left oblique (dorsal)</string>
-    <string name="step_left_oblique_dorsal_hint">Rotate the back of your hand slightly left.</string>
-    <string name="step_right_oblique_dorsal_title">Right oblique (dorsal)</string>
-    <string name="step_right_oblique_dorsal_hint">Rotate the back of your hand slightly right.</string>
-    <string name="step_up_tilt_dorsal_title">Up tilt (dorsal)</string>
-    <string name="step_up_tilt_dorsal_hint">Tilt the back of your hand upward to reveal thickness.</string>
-    <string name="step_down_tilt_dorsal_title">Down tilt (dorsal)</string>
-    <string name="step_down_tilt_dorsal_hint">Tilt the back of your hand downward to complete the set.</string>
+    <string name="step_back_of_hand_title">Mu bàn tay</string>
+    <string name="step_back_of_hand_hint">Đưa mu bàn tay vào khung hình và giữ thẻ chuẩn gần ngón áp út.</string>
+    <string name="step_left_oblique_dorsal_title">Nghiêng trái (mu tay)</string>
+    <string name="step_left_oblique_dorsal_hint">Xoay mu bàn tay nhẹ sang trái.</string>
+    <string name="step_right_oblique_dorsal_title">Nghiêng phải (mu tay)</string>
+    <string name="step_right_oblique_dorsal_hint">Xoay mu bàn tay nhẹ sang phải.</string>
+    <string name="step_up_tilt_dorsal_title">Ngửa lên (mu tay)</string>
+    <string name="step_up_tilt_dorsal_hint">Ngửa mu bàn tay lên để lộ rõ độ dày.</string>
+    <string name="step_down_tilt_dorsal_title">Úp xuống (mu tay)</string>
+    <string name="step_down_tilt_dorsal_hint">Úp mu bàn tay xuống để hoàn tất bộ góc chụp.</string>
 
-    <string name="pose_hint_place_hand_in_frame">Place your hand in frame.</string>
-    <string name="pose_hint_place_card_near_finger">Place the card near your finger.</string>
-    <string name="pose_hint_adjust_hand_pose">Adjust hand pose.</string>
-    <string name="pose_hint_hold_hand_steady">Hold your hand steady.</string>
-    <string name="pose_hint_frame_hand_clearer">Move hand into frame more clearly.</string>
-    <string name="pose_hint_rotate_left_more">Rotate hand more to the left.</string>
-    <string name="pose_hint_rotate_right_more">Rotate hand more to the right.</string>
-    <string name="pose_hint_tilt_up_more">Tilt hand upward more.</string>
-    <string name="pose_hint_tilt_down_more">Tilt hand downward more.</string>
-    <string name="pose_hint_face_palm_to_camera">Face your palm directly to the camera.</string>
+    <string name="pose_hint_place_hand_in_frame">Đưa tay vào trong khung hình.</string>
+    <string name="pose_hint_place_card_near_finger">Đưa thẻ chuẩn lại gần ngón tay.</string>
+    <string name="pose_hint_adjust_hand_pose">Điều chỉnh lại tư thế tay.</string>
+    <string name="pose_hint_hold_hand_steady">Giữ tay ổn định.</string>
+    <string name="pose_hint_frame_hand_clearer">Di chuyển tay vào khung hình rõ hơn.</string>
+    <string name="pose_hint_rotate_left_more">Xoay tay sang trái thêm.</string>
+    <string name="pose_hint_rotate_right_more">Xoay tay sang phải thêm.</string>
+    <string name="pose_hint_tilt_up_more">Ngửa tay lên thêm.</string>
+    <string name="pose_hint_tilt_down_more">Úp tay xuống thêm.</string>
+    <string name="pose_hint_face_palm_to_camera">Hướng lòng bàn tay trực diện camera.</string>
 </resources>

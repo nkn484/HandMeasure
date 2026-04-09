@@ -6,7 +6,7 @@ import com.handtryon.domain.FingerAnchor
 import com.handtryon.domain.HandPoseSnapshot
 import com.handtryon.engine.compat.TryOnEngineDomainMapper
 
-class DefaultFingerAnchorProvider(
+internal class DefaultFingerAnchorProvider(
     private val anchorFactory: FingerAnchorFactory = DefaultFingerAnchorFactory(),
     private val mapper: TryOnEngineDomainMapper = TryOnEngineDomainMapper(),
 ) : FingerAnchorProvider {

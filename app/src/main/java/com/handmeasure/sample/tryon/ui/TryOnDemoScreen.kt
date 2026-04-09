@@ -160,7 +160,7 @@ fun TryOnDemoScreen(
                 if (result == null && autoLaunchMeasureOnStart) {
                     Toast.makeText(
                         context,
-                        "Measurement canceled. Simulated handoff applied for demo continuity.",
+                        "Đã hủy đo tay. Đã áp dụng handoff mô phỏng để demo không bị gián đoạn.",
                         Toast.LENGTH_SHORT,
                     ).show()
                 }
@@ -221,7 +221,7 @@ fun TryOnDemoScreen(
                 analysisOutputImageFormat = androidx.camera.core.ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888,
                 analysisTargetResolution = android.util.Size(960, 720),
                 onError = { throwable ->
-                    Toast.makeText(context, "Camera bind failed: ${throwable.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Không thể khởi tạo camera: ${throwable.message}", Toast.LENGTH_SHORT).show()
                 },
             )
             onDispose {
@@ -251,12 +251,12 @@ fun TryOnDemoScreen(
         ) {
             onBack?.let { goBack ->
                 Button(onClick = goBack) {
-                    Text("Back to Demo Landing")
+                    Text("Quay lại màn hình demo")
                 }
             }
             if (!hasCameraPermission) {
                 Text(
-                    text = "Camera permission is required for realtime try-on.",
+                    text = "Cần cấp quyền camera để thử nhẫn theo thời gian thực.",
                     color = Color.White,
                     style = MaterialTheme.typography.bodySmall,
                     modifier =
@@ -267,7 +267,7 @@ fun TryOnDemoScreen(
             }
             if (ringBitmap == null) {
                 Text(
-                    text = "Ring asset failed to load. Overlay and export are unavailable.",
+                    text = "Không tải được asset nhẫn. Không thể hiển thị overlay hoặc xuất ảnh.",
                     color = Color.White,
                     style = MaterialTheme.typography.bodySmall,
                     modifier =
@@ -323,7 +323,7 @@ fun TryOnDemoScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = "Mode: ${currentSession?.mode.toModeLabel()}",
+                text = "Chế độ: ${currentSession?.mode.toModeLabel()}",
                 color = Color.White,
                 style = MaterialTheme.typography.titleMedium,
             )
@@ -335,7 +335,7 @@ fun TryOnDemoScreen(
             Text(
                 text =
                     latestMeasurementHandoff?.summary
-                        ?: "Handoff: none. Use Measure Hand or Use Sample Handoff for a combined demo story.",
+                        ?: "Handoff: chưa có. Hãy dùng Đo tay hoặc Dùng handoff mẫu để hoàn tất luồng demo.",
                 color = Color(0xFFB2FF59),
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -348,7 +348,7 @@ fun TryOnDemoScreen(
                     modifier = Modifier.weight(1f),
                     enabled = ringBitmap != null,
                 ) {
-                    Text("Detect Hand")
+                    Text("Nhận diện tay")
                 }
                 Button(
                     onClick = {
@@ -376,7 +376,7 @@ fun TryOnDemoScreen(
                     modifier = Modifier.weight(1f),
                     enabled = ringBitmap != null,
                 ) {
-                    Text("Manual adjust")
+                    Text("Chỉnh tay")
                 }
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -386,7 +386,7 @@ fun TryOnDemoScreen(
                     },
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text("Measure Hand")
+                    Text("Đo tay")
                 }
                 Button(
                     onClick = {
@@ -394,7 +394,7 @@ fun TryOnDemoScreen(
                     },
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text("Use Sample Handoff")
+                    Text("Dùng handoff mẫu")
                 }
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -415,16 +415,16 @@ fun TryOnDemoScreen(
                         exportedPath = file.absolutePath
                         val note =
                             if (rendered.validation.notes.isEmpty()) {
-                                "ok"
+                                "ổn"
                             } else {
                                 rendered.validation.notes.joinToString()
                             }
-                        Toast.makeText(context, "Export: ${file.name} ($note)", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Đã xuất: ${file.name} ($note)", Toast.LENGTH_SHORT).show()
                         rendered.bitmap.recycle()
                     },
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text("Export Capture")
+                    Text("Xuất ảnh")
                 }
                 Button(
                     onClick = {
@@ -432,19 +432,19 @@ fun TryOnDemoScreen(
                     },
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text("Clear Handoff")
+                    Text("Xóa handoff")
                 }
             }
             exportedPath?.let {
                 Text(
-                    text = "Saved: $it",
+                    text = "Đã lưu: $it",
                     color = Color(0xFFB2FF59),
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
             latestMeasurementHandoff?.let { handoff ->
                 Text(
-                    text = "Source: ${handoff.sourceLabel}",
+                    text = "Nguồn: ${handoff.sourceLabel}",
                     color = Color(0xFFE0E0E0),
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -457,7 +457,7 @@ private fun upsertSnapshot(
     existing: Bitmap?,
     source: Bitmap,
 ): Bitmap {
-    if (isReusableSnapshot(existing, source)) {
+    if (existing != null && isReusableSnapshot(existing, source)) {
         val canvas = android.graphics.Canvas(existing)
         canvas.drawBitmap(source, 0f, 0f, null)
         return existing
@@ -467,9 +467,9 @@ private fun upsertSnapshot(
 }
 
 private fun isReusableSnapshot(
-    existing: Bitmap?,
+    existing: Bitmap,
     source: Bitmap,
-): Boolean = existing != null && existing.width == source.width && existing.height == source.height && existing.isMutable
+): Boolean = existing.width == source.width && existing.height == source.height && existing.isMutable
 
 private class MutableHandPoseProvider : HandPoseProvider {
     var snapshot: HandPoseSnapshot? = null
@@ -484,14 +484,14 @@ private class MutableMeasurementProvider : OptionalMeasurementProvider {
 }
 
 private fun RuntimeMetrics?.toRuntimeText(): String {
-    val metrics = this ?: return "Realtime: waiting..."
+    val metrics = this ?: return "Realtime: đang chờ..."
     val hz =
         if (metrics.avgUpdateIntervalMs <= 0.0) {
             0
         } else {
             (1000.0 / metrics.avgUpdateIntervalMs).roundToInt()
         }
-    return "Realtime detect=${"%.1f".format(metrics.avgDetectionMs)}ms update=${hz}Hz memDelta=${metrics.approxMemoryDeltaKb}KB"
+    return "Realtime nhận diện=${"%.1f".format(metrics.avgDetectionMs)} ms, cập nhật=${hz} Hz, chênh bộ nhớ=${metrics.approxMemoryDeltaKb} KB"
 }
 
 private fun HandDetection.toPoseSnapshot(
@@ -521,10 +521,10 @@ private fun saveRenderedBitmap(
 
 private fun TryOnMode?.toModeLabel(): String =
     when (this) {
-        TryOnMode.Measured -> "Measured"
-        TryOnMode.LandmarkOnly -> "Landmark Only"
-        TryOnMode.Manual -> "Manual"
-        null -> "Manual"
+        TryOnMode.Measured -> "Đã đo"
+        TryOnMode.LandmarkOnly -> "Theo landmark"
+        TryOnMode.Manual -> "Thủ công"
+        null -> "Thủ công"
     }
 
 private const val DEMO_FALLBACK_FRAME_WIDTH = 1080

@@ -40,9 +40,9 @@ internal class TryOnEngineDomainMapper {
     ): TryOnEngineRequest =
         TryOnEngineRequest(
             asset = asset.toCoreAsset(),
-            handPose = handPose?.toCoreHandPose(),
+            handPose = handPose?.toCoreHandPoseInternal(),
             measurement = measurement?.toCoreMeasurement(),
-            manualPlacement = manualPlacement?.toCorePlacement(),
+            manualPlacement = manualPlacement?.toCorePlacementInternal(),
             previousSession = previousSession?.toCoreSession(),
             frameWidth = frameWidth,
             frameHeight = frameHeight,
@@ -59,17 +59,18 @@ internal class TryOnEngineDomainMapper {
             renderState = toRenderState(result),
         )
 
-    fun toCoreHandPose(pose: HandPoseSnapshot): CoreHandPoseSnapshot = pose.toCoreHandPose()
+    fun toCoreHandPose(pose: HandPoseSnapshot): CoreHandPoseSnapshot = pose.toCoreHandPoseInternal()
 
-    fun toDomainAnchor(anchor: CoreFingerAnchor): FingerAnchor = anchor.toDomainAnchor()
+    fun toDomainAnchor(anchor: CoreFingerAnchor): FingerAnchor = anchor.toDomainAnchorInternal()
 
-    fun toCoreAnchor(anchor: FingerAnchor): CoreFingerAnchor = anchor.toCoreAnchor()
+    fun toCoreAnchor(anchor: FingerAnchor): CoreFingerAnchor = anchor.toCoreAnchorInternal()
 
-    fun toCorePlacement(placement: RingPlacement): CorePlacement = placement.toCorePlacement()
+    fun toCorePlacement(placement: RingPlacement): CorePlacement = placement.toCorePlacementInternal()
 
-    fun toDomainPlacement(placement: CorePlacement): RingPlacement = placement.toDomainPlacement()
+    fun toDomainPlacement(placement: CorePlacement): RingPlacement = placement.toDomainPlacementInternal()
 
-    fun toDomainPlacementValidation(validation: CorePlacementValidation): PlacementValidation = validation.toDomainPlacementValidation()
+    fun toDomainPlacementValidation(validation: CorePlacementValidation): PlacementValidation =
+        validation.toDomainPlacementValidationInternal()
 
     private fun RingAssetSource.toCoreAsset(): CoreAssetSource =
         CoreAssetSource(
@@ -91,7 +92,7 @@ internal class TryOnEngineDomainMapper {
             rotationBiasDeg = rotationBiasDeg,
         )
 
-    private fun HandPoseSnapshot.toCoreHandPose(): CoreHandPoseSnapshot =
+    private fun HandPoseSnapshot.toCoreHandPoseInternal(): CoreHandPoseSnapshot =
         CoreHandPoseSnapshot(
             frameWidth = frameWidth,
             frameHeight = frameHeight,
@@ -111,7 +112,7 @@ internal class TryOnEngineDomainMapper {
             usable = usable,
         )
 
-    private fun RingPlacement.toCorePlacement(): CorePlacement =
+    private fun RingPlacement.toCorePlacementInternal(): CorePlacement =
         CorePlacement(
             centerX = centerX,
             centerY = centerY,
@@ -119,7 +120,7 @@ internal class TryOnEngineDomainMapper {
             rotationDegrees = rotationDegrees,
         )
 
-    private fun CorePlacement.toDomainPlacement(): RingPlacement =
+    private fun CorePlacement.toDomainPlacementInternal(): RingPlacement =
         RingPlacement(
             centerX = centerX,
             centerY = centerY,
@@ -127,7 +128,7 @@ internal class TryOnEngineDomainMapper {
             rotationDegrees = rotationDegrees,
         )
 
-    private fun FingerAnchor.toCoreAnchor(): CoreFingerAnchor =
+    private fun FingerAnchor.toCoreAnchorInternal(): CoreFingerAnchor =
         CoreFingerAnchor(
             centerX = centerX,
             centerY = centerY,
@@ -137,7 +138,7 @@ internal class TryOnEngineDomainMapper {
             timestampMs = timestampMs,
         )
 
-    private fun CoreFingerAnchor.toDomainAnchor(): FingerAnchor =
+    private fun CoreFingerAnchor.toDomainAnchorInternal(): FingerAnchor =
         FingerAnchor(
             centerX = centerX,
             centerY = centerY,
@@ -152,8 +153,8 @@ internal class TryOnEngineDomainMapper {
             asset = asset.toCoreAsset(),
             mode = mode.toCoreMode(),
             quality = quality.toCoreQuality(),
-            anchor = anchor?.toCoreAnchor(),
-            placement = placement.toCorePlacement(),
+            anchor = anchor?.toCoreAnchorInternal(),
+            placement = placement.toCorePlacementInternal(),
             updatedAtMs = updatedAtMs,
         )
 
@@ -162,16 +163,16 @@ internal class TryOnEngineDomainMapper {
             asset = asset.toDomainAsset(),
             mode = mode.toDomainMode(),
             quality = quality.toDomainQuality(),
-            anchor = anchor?.toDomainAnchor(),
-            placement = placement.toDomainPlacement(),
+            anchor = anchor?.toDomainAnchorInternal(),
+            placement = placement.toDomainPlacementInternal(),
             updatedAtMs = updatedAtMs,
         )
 
     private fun TryOnEngineRenderState.toDomainRenderState(): TryOnRenderState =
         TryOnRenderState(
             mode = mode.toDomainMode(),
-            anchor = anchor?.toDomainAnchor(),
-            placement = placement.toDomainPlacement(),
+            anchor = anchor?.toDomainAnchorInternal(),
+            placement = placement.toDomainPlacementInternal(),
             generatedAtMs = generatedAtMs,
         )
 
@@ -207,7 +208,7 @@ internal class TryOnEngineDomainMapper {
             usedLastGoodAnchor = usedLastGoodAnchor,
         )
 
-    private fun CorePlacementValidation.toDomainPlacementValidation(): PlacementValidation =
+    private fun CorePlacementValidation.toDomainPlacementValidationInternal(): PlacementValidation =
         PlacementValidation(
             widthRatio = widthRatio,
             anchorDistancePx = anchorDistancePx,

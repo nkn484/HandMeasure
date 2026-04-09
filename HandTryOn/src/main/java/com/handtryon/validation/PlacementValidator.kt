@@ -6,7 +6,7 @@ import com.handtryon.domain.PlacementValidation
 import com.handtryon.domain.RingPlacement
 import com.handtryon.engine.compat.TryOnEngineDomainMapper
 
-class PlacementValidator(
+internal class PlacementValidator(
     private val policy: PlacementValidationPolicy = PlacementValidationPolicy(),
     private val mapper: TryOnEngineDomainMapper = TryOnEngineDomainMapper(),
 ) {

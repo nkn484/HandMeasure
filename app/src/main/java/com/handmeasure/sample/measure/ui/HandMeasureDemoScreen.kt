@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import com.handmeasure.api.HandMeasureConfig
 import com.handmeasure.api.HandMeasureContract
 import com.handmeasure.api.HandMeasureResult
+import com.handmeasure.api.HandMeasureWarning
 import com.handmeasure.api.QualityThresholds
 import com.handmeasure.api.TargetFinger
 
@@ -27,21 +28,21 @@ fun HandMeasureDemoScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var latestSummary by rememberSaveable { mutableStateOf("No result yet.") }
-    var latestWarnings by rememberSaveable { mutableStateOf("Warnings: none") }
+    var latestSummary by rememberSaveable { mutableStateOf("Chưa có kết quả.") }
+    var latestWarnings by rememberSaveable { mutableStateOf("Cảnh báo: không có") }
 
     val launcher =
         rememberLauncherForActivityResult(HandMeasureContract()) { result ->
             if (result == null) {
-                latestSummary = "No result returned (cancelled or exited early)."
-                latestWarnings = "Warnings: n/a"
+                latestSummary = "Không nhận được kết quả (đã hủy hoặc thoát sớm)."
+                latestWarnings = "Cảnh báo: không áp dụng"
             } else {
                 latestSummary = result.toSummaryText()
                 latestWarnings =
                     if (result.warnings.isEmpty()) {
-                        "Warnings: none"
+                        "Cảnh báo: không có"
                     } else {
-                        "Warnings: ${result.warnings.joinToString()}"
+                        "Cảnh báo: ${result.warnings.joinToString { it.toVietnameseLabel() }}"
                     }
             }
         }
@@ -54,21 +55,21 @@ fun HandMeasureDemoScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
-            text = "HandMeasure Demo",
+            text = "Demo HandMeasure",
             style = MaterialTheme.typography.headlineSmall,
         )
         Text(
-            text = "Uses stable demo defaults for ring finger measurement.",
+            text = "Sử dụng cấu hình demo ổn định để đo ngón áp út.",
             style = MaterialTheme.typography.bodyMedium,
         )
         Button(
             onClick = { launcher.launch(defaultDemoMeasureConfig()) },
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Start HandMeasure")
+            Text("Bắt đầu đo tay")
         }
         Button(onClick = onBack, modifier = Modifier.fillMaxWidth()) {
-            Text("Back to Demo Landing")
+            Text("Quay lại màn hình demo")
         }
         Text(text = latestSummary, style = MaterialTheme.typography.bodyMedium)
         Text(text = latestWarnings, style = MaterialTheme.typography.bodySmall)
@@ -86,4 +87,17 @@ fun defaultDemoMeasureConfig(): HandMeasureConfig =
     )
 
 private fun HandMeasureResult.toSummaryText(): String =
-    "Size ${suggestedRingSizeLabel}, diameter ${"%.2f".format(equivalentDiameterMm)}mm, confidence ${"%.2f".format(confidenceScore)}"
+    "Size ${suggestedRingSizeLabel}, đường kính ${"%.2f".format(equivalentDiameterMm)} mm, độ tin cậy ${"%.2f".format(confidenceScore)}"
+
+private fun HandMeasureWarning.toVietnameseLabel(): String =
+    when (this) {
+        HandMeasureWarning.BEST_EFFORT_ESTIMATE -> "Ước tính tốt nhất có thể"
+        HandMeasureWarning.LOW_CARD_CONFIDENCE -> "Độ tin cậy thẻ chuẩn thấp"
+        HandMeasureWarning.LOW_POSE_CONFIDENCE -> "Độ tin cậy tư thế thấp"
+        HandMeasureWarning.LOW_LIGHTING -> "Ánh sáng yếu"
+        HandMeasureWarning.HIGH_MOTION -> "Chuyển động cao"
+        HandMeasureWarning.HIGH_BLUR -> "Hình ảnh bị mờ"
+        HandMeasureWarning.THICKNESS_ESTIMATED_FROM_WEAK_ANGLES -> "Độ dày ước tính từ góc chụp yếu"
+        HandMeasureWarning.CALIBRATION_WEAK -> "Hiệu chuẩn yếu"
+        HandMeasureWarning.LOW_RESULT_RELIABILITY -> "Độ tin cậy kết quả thấp"
+    }
