@@ -3,6 +3,14 @@ package com.handmeasure.coordinator
 import android.graphics.Bitmap
 import com.handmeasure.api.HandMeasureConfig
 import com.handmeasure.api.HandMeasureResult
+import com.handmeasure.api.CaptureStep
+import com.handmeasure.core.capture.CaptureRetryReason
+import com.handmeasure.core.capture.CaptureRetryReasonInput
+import com.handmeasure.core.capture.CaptureRetryReasonPolicy
+import com.handmeasure.core.capture.HoldStillState
+import com.handmeasure.core.capture.OrientationBucketClassifier
+import com.handmeasure.core.capture.OrientationBucketDefinition
+import com.handmeasure.core.capture.OrientationObservation
 import com.handmeasure.flow.CaptureUiState
 import com.handmeasure.flow.HandMeasureStateMachine
 import com.handmeasure.flow.ProtocolGuides
@@ -39,8 +47,11 @@ data class LiveAnalysisState(
     val cardDetection: CardDetection?,
     val frameWidth: Int,
     val frameHeight: Int,
+    val bucketStep: CaptureStep?,
+    val holdStillState: HoldStillState = HoldStillState.SEARCHING,
     val poseGuidanceHint: String?,
     val poseGuidanceHintKey: PoseGuidanceHintKey? = null,
+    val retryReasonHintKey: PoseGuidanceHintKey? = null,
 )
 
 class HandMeasureCoordinator(
@@ -58,8 +69,27 @@ class HandMeasureCoordinator(
 ) {
     private val protocolSteps = CaptureProtocols.steps(config.protocol).associateBy { it.step }
     private val stateMachine = HandMeasureStateMachine(config.qualityThresholds, ProtocolGuides.steps(config.protocol))
-    private var previousStep = stateMachine.currentStep().step
     private val engineApiMapper = MeasurementEngineApiMapper()
+    private val bucketClassifier =
+        OrientationBucketClassifier(
+            definitions =
+                CaptureProtocols
+                    .steps(config.protocol)
+                    .map { protocolStep ->
+                        OrientationBucketDefinition(
+                            bucket = protocolStep.step,
+                            targetX = protocolStep.poseTarget.nx,
+                            targetY = protocolStep.poseTarget.ny,
+                            targetZ = protocolStep.poseTarget.nz,
+                        )
+                    },
+        )
+    private val retryReasonPolicy =
+        CaptureRetryReasonPolicy(
+            lockQualityScore = config.qualityThresholds.autoCaptureScore,
+            motionMinScore = config.qualityThresholds.motionMinScore,
+            lightingMinScore = config.qualityThresholds.lightingMinScore,
+        )
 
     private val frameSignalEstimator = FrameSignalEstimator()
     private val poseGuidanceHintDecider = PoseGuidanceHintDecider()
@@ -81,16 +111,23 @@ class HandMeasureCoordinator(
     fun currentState(): CaptureUiState = stateMachine.snapshot()
 
     fun analyzeFrame(jpegBytes: ByteArray, bitmap: Bitmap): LiveAnalysisState {
-        val currentStep = stateMachine.currentStep()
-        val protocolStep = protocolSteps[currentStep.step]
-        if (previousStep != currentStep.step) {
-            poseClassifier.reset()
-            frameSignalEstimator.resetTemporalState()
-            previousStep = currentStep.step
-        }
-
+        val fallbackStep = stateMachine.currentStep().step
         val hand = handLandmarkEngine.detect(bitmap)
         val card = referenceCardDetector.detect(bitmap)
+        val bucketDecision =
+            bucketClassifier.classify(
+                hand?.let { detectedHand ->
+                    poseClassifier.extractPalmNormal(detectedHand)?.let { snapshot ->
+                        OrientationObservation(
+                            normalX = snapshot.normalX,
+                            normalY = snapshot.normalY,
+                            normalZ = snapshot.normalZ,
+                        )
+                    }
+                },
+            )
+        val resolvedStep = bucketDecision.bucket ?: fallbackStep
+        val protocolStep = protocolSteps[resolvedStep]
         val poseEvaluation = hand?.let { ps -> protocolStep?.poseTarget?.let { target -> poseClassifier.evaluate(target, ps) } }
         val ringZoneScore = if (hand?.fingerJointPair(config.targetFinger) != null) 1f else 0f
         val imageSignals = frameSignalEstimator.estimate(bitmap, hand, card, config.targetFinger)
@@ -124,7 +161,7 @@ class HandMeasureCoordinator(
         val updatedState =
             stateMachine.onFrameEvaluated(
                 StepCandidate(
-                    step = currentStep.step,
+                    step = resolvedStep,
                     frameBytes = jpegBytes,
                     qualityScore = quality.totalScore,
                     poseScore = quality.subscores.poseConfidence,
@@ -133,17 +170,35 @@ class HandMeasureCoordinator(
                     blurScore = quality.subscores.blurScore,
                     motionScore = quality.subscores.motionScore,
                     lightingScore = quality.subscores.lightingScore,
+                    bucketScore = bucketDecision.score,
                     confidencePenaltyReasons = quality.confidencePenaltyReasons,
                 ),
+                isBucketStable = bucketDecision.score >= BUCKET_STABILITY_SCORE_MIN,
             )
 
-        val hintKey =
+        val poseHintKey =
             poseGuidanceHintDecider.decide(
                 level = poseEvaluation?.level,
                 action = poseEvaluation?.guidanceAction,
                 hand = hand,
                 card = card,
             )
+        val retryReason =
+            retryReasonPolicy.decide(
+                CaptureRetryReasonInput(
+                    handDetected = hand != null,
+                    cardDetected = card != null,
+                    holdStillState = updatedState.holdStillState,
+                    qualityScore = quality.totalScore,
+                    poseScore = quality.subscores.poseConfidence,
+                    motionScore = quality.subscores.motionScore,
+                    lightingScore = quality.subscores.lightingScore,
+                    coplanarityScore = coplanarityProxyScore,
+                    penaltyReasons = quality.confidencePenaltyReasons,
+                ),
+            )
+        val retryHintKey = retryReason?.toHintKey()
+        val resolvedHintKey = retryHintKey ?: poseHintKey
 
         return LiveAnalysisState(
             captureState = updatedState,
@@ -160,8 +215,11 @@ class HandMeasureCoordinator(
             cardDetection = card,
             frameWidth = bitmap.width,
             frameHeight = bitmap.height,
-            poseGuidanceHintKey = hintKey,
-            poseGuidanceHint = hintKey?.let { poseGuidanceHintTextResolver?.resolve(it) },
+            bucketStep = bucketDecision.bucket,
+            holdStillState = updatedState.holdStillState,
+            poseGuidanceHintKey = resolvedHintKey,
+            retryReasonHintKey = retryHintKey,
+            poseGuidanceHint = resolvedHintKey?.let { poseGuidanceHintTextResolver?.resolve(it) },
         )
     }
 
@@ -179,5 +237,21 @@ class HandMeasureCoordinator(
 
         debugSessionExporter.export(result, processing.overlays.map(engineApiMapper::toApiOverlay))
         return result
+    }
+
+    private fun CaptureRetryReason.toHintKey(): PoseGuidanceHintKey =
+        when (this) {
+            CaptureRetryReason.PLACE_HAND_IN_FRAME -> PoseGuidanceHintKey.PLACE_HAND_IN_FRAME
+            CaptureRetryReason.PLACE_CARD_NEAR_FINGER -> PoseGuidanceHintKey.PLACE_CARD_NEAR_FINGER
+            CaptureRetryReason.WAIT_FOR_LOCK -> PoseGuidanceHintKey.WAIT_FOR_LOCK
+            CaptureRetryReason.HOLD_HAND_STEADIER -> PoseGuidanceHintKey.HOLD_HAND_STEADY
+            CaptureRetryReason.REDUCE_GLARE -> PoseGuidanceHintKey.REDUCE_GLARE
+            CaptureRetryReason.ADJUST_HAND_ANGLE -> PoseGuidanceHintKey.ADJUST_HAND_POSE
+            CaptureRetryReason.KEEP_HAND_AND_CARD_CLOSER -> PoseGuidanceHintKey.KEEP_HAND_AND_CARD_CLOSER
+            CaptureRetryReason.TRACKING_UNSTABLE -> PoseGuidanceHintKey.TRACKING_UNSTABLE
+        }
+
+    private companion object {
+        const val BUCKET_STABILITY_SCORE_MIN = 0.52f
     }
 }

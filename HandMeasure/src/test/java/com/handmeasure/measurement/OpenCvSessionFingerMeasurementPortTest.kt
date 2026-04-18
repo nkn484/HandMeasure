@@ -10,7 +10,10 @@ import com.handmeasure.core.measurement.WidthMeasurementSource
 import com.handmeasure.core.session.SessionFingerMeasurementRequest
 import com.handmeasure.core.session.SessionScale
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+@RunWith(RobolectricTestRunner::class)
 class OpenCvSessionFingerMeasurementPortTest {
     @Test
     fun measureVisibleWidth_delegatesAndMapsRequestAndResult() {

@@ -27,6 +27,10 @@
     <string name="pose_hint_place_card_near_finger">Đưa thẻ chuẩn lại gần ngón tay.</string>
     <string name="pose_hint_adjust_hand_pose">Điều chỉnh lại tư thế tay.</string>
     <string name="pose_hint_hold_hand_steady">Giữ tay ổn định.</string>
+    <string name="pose_hint_wait_for_lock">Giữ yên thêm một chút để hệ thống khóa khung hình.</string>
+    <string name="pose_hint_reduce_glare">Giảm chói trên thẻ chuẩn hoặc đổi góc sáng.</string>
+    <string name="pose_hint_keep_hand_card_closer">Giữ ngón tay và thẻ chuẩn gần nhau hơn.</string>
+    <string name="pose_hint_tracking_unstable">Theo dõi chưa ổn định, giữ tay trong khung rõ hơn.</string>
     <string name="pose_hint_frame_hand_clearer">Di chuyển tay vào khung hình rõ hơn.</string>
     <string name="pose_hint_rotate_left_more">Xoay tay sang trái thêm.</string>
     <string name="pose_hint_rotate_right_more">Xoay tay sang phải thêm.</string>

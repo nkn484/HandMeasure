@@ -55,6 +55,8 @@ import com.handtryon.domain.RingAssetSource
 import com.handtryon.domain.RingPlacement
 import com.handtryon.domain.TryOnMode
 import com.handtryon.domain.TryOnSession
+import com.handtryon.domain.TryOnTrackingState
+import com.handtryon.domain.TryOnUpdateAction
 import com.handtryon.realtime.TryOnRealtimeAnalyzer
 import com.handtryon.render.StableRingOverlayRenderer
 import com.handtryon.ui.TryOnOverlay
@@ -284,6 +286,10 @@ fun TryOnDemoScreen(
             placement = currentSession?.placement,
             anchor = currentSession?.anchor,
             renderer = previewRenderer,
+            mode = currentSession?.mode ?: TryOnMode.LandmarkOnly,
+            qualityScore = currentSession?.quality?.qualityScore ?: (currentSession?.anchor?.confidence ?: 0.62f),
+            trackingState = currentSession?.quality?.trackingState ?: TryOnTrackingState.Searching,
+            updateAction = currentSession?.quality?.updateAction ?: TryOnUpdateAction.Update,
             manualAdjustEnabled = manualAdjustEnabled || currentSession?.mode == TryOnMode.Manual,
             onManualTransform = { panXFrame, panYFrame, zoom, rotationDeg ->
                 val oldPlacement = manualPlacement ?: currentSession?.placement ?: return@TryOnOverlay
@@ -410,6 +416,10 @@ fun TryOnDemoScreen(
                                 rawPlacement = active.placement,
                                 anchor = active.anchor,
                                 mode = active.mode,
+                                qualityScore = active.quality.qualityScore,
+                                trackingState = active.quality.trackingState,
+                                updateAction = active.quality.updateAction,
+                                shouldRenderOverlay = active.quality.updateAction != TryOnUpdateAction.Hide,
                             )
                         val file = saveRenderedBitmap(context, rendered.bitmap)
                         exportedPath = file.absolutePath

@@ -465,6 +465,10 @@ private fun PoseGuidanceHintKey.toResId(): Int =
         PoseGuidanceHintKey.PLACE_CARD_NEAR_FINGER -> R.string.pose_hint_place_card_near_finger
         PoseGuidanceHintKey.ADJUST_HAND_POSE -> R.string.pose_hint_adjust_hand_pose
         PoseGuidanceHintKey.HOLD_HAND_STEADY -> R.string.pose_hint_hold_hand_steady
+        PoseGuidanceHintKey.WAIT_FOR_LOCK -> R.string.pose_hint_wait_for_lock
+        PoseGuidanceHintKey.REDUCE_GLARE -> R.string.pose_hint_reduce_glare
+        PoseGuidanceHintKey.KEEP_HAND_AND_CARD_CLOSER -> R.string.pose_hint_keep_hand_card_closer
+        PoseGuidanceHintKey.TRACKING_UNSTABLE -> R.string.pose_hint_tracking_unstable
         PoseGuidanceHintKey.FRAME_HAND_CLEARER -> R.string.pose_hint_frame_hand_clearer
         PoseGuidanceHintKey.ROTATE_LEFT_MORE -> R.string.pose_hint_rotate_left_more
         PoseGuidanceHintKey.ROTATE_RIGHT_MORE -> R.string.pose_hint_rotate_right_more

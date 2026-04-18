@@ -10,7 +10,7 @@
 - Reference calibration: ID-1 card (`85.60 mm x 53.98 mm`)
 - v1 prioritizes deterministic result delivery over lab-grade accuracy
 - v1 does not implement automatic timeout
-- v1 uses a guided 5-step capture flow and always returns a result once the full sequence is completed
+- v1 now uses an auto-bucketing capture flow over 5 measurement categories (the UI still reports category progress)
 
 ## Recent improvements (current revision)
 
@@ -33,6 +33,11 @@
 - Finger width measurement is now band-based with adaptive ROI and robust outlier rejection.
 - Multi-view thickness fusion now uses weighted robust aggregation with left/right + up/down consistency penalties.
 - Pose guidance is smoothed with hysteresis and user-facing hints.
+- Capture flow now auto-buckets frames into angle categories (frontal/left/right/up/down) using tolerant orientation ranges + hysteresis.
+- Per-bucket frame selection now uses a short rolling window and best-of-window candidate commit.
+- Auto-capture now requires a short hold-still lock window before commit (reduces transient shake captures).
+- Retry guidance now maps directly from runtime penalty signals (motion, lighting/glare, pose, coplanarity, lock-wait).
+- Adaptive protocol mode assessment (`FAST_PREVIEW`/`STANDARD`/`PRECISE`) is now tracked for runtime diagnostics.
 - Debug overlay mapping now uses actual frame dimensions (no hard-coded `1280` scaling).
 - Optional replay/debug modes were added:
   - `debugReplayInputPath` for deterministic flow replay
@@ -114,16 +119,16 @@ launcher.launch(
 4. `UP_TILT`
 5. `DOWN_TILT`
 
-For each step the module:
+For each protocol category the module now:
 
-- shows guidance text
-- continuously scores frames
-- keeps the best frame candidate
-- auto-captures when the score crosses the threshold
-- also allows manual progression using the best candidate seen so far
-- allows retry of the current step
-
-After all steps are captured, the library stops the camera, shows a processing screen, computes the measurement, then shows a result screen.
+- continuously analyzes live frames (no strict user-driven step lock-in)
+- auto-classifies each frame into angle buckets using tolerant pose ranges with hysteresis
+- keeps a short rolling candidate window per bucket
+- requires a short hold-still window before auto-committing
+- commits the best frame in the current window (not only the latest frame)
+- still allows manual progression using the current best candidate
+- still allows retry of the current category
+After required bucket coverage is completed, the library stops the camera, shows a processing screen, computes the measurement, then shows a result screen.
 
 ## Calibration model
 

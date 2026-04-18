@@ -3,6 +3,7 @@ package com.handmeasure.flow
 import com.google.common.truth.Truth.assertThat
 import com.handmeasure.api.CaptureStep
 import com.handmeasure.api.QualityThresholds
+import com.handmeasure.core.capture.HoldStillState
 import com.handmeasure.protocol.ProtocolStepRole
 import org.junit.Test
 
@@ -80,9 +81,84 @@ class HandMeasureStateMachineTest {
         assertThat(nextStepState.canAdvanceWithBest).isFalse()
     }
 
+    @Test
+    fun onFrameEvaluated_allowsOutOfOrderBuckets_withoutRejectingCandidate() {
+        val machine = HandMeasureStateMachine(thresholds = thresholds, stepDefinitions = steps)
+
+        val state =
+            machine.onFrameEvaluated(
+                candidate(step = CaptureStep.LEFT_OBLIQUE_DORSAL, qualityScore = 0.63f),
+            )
+
+        assertThat(state.currentStep.step).isEqualTo(CaptureStep.LEFT_OBLIQUE_DORSAL)
+        assertThat(state.bestCurrentCandidate).isNotNull()
+    }
+
+    @Test
+    fun autoCapture_requiresHoldStillWindow_beforeCommit() {
+        val machine = HandMeasureStateMachine(thresholds = thresholds, stepDefinitions = steps)
+
+        machine.onFrameEvaluated(
+            candidate(step = CaptureStep.BACK_OF_HAND, qualityScore = 0.90f, motionScore = 0.72f),
+            timestampMs = 0L,
+            isBucketStable = true,
+        )
+        machine.onFrameEvaluated(
+            candidate(step = CaptureStep.BACK_OF_HAND, qualityScore = 0.89f, motionScore = 0.69f),
+            timestampMs = 160L,
+            isBucketStable = true,
+        )
+        val beforeLock =
+            machine.onFrameEvaluated(
+                candidate(step = CaptureStep.BACK_OF_HAND, qualityScore = 0.91f, motionScore = 0.68f),
+                timestampMs = 300L,
+                isBucketStable = true,
+            )
+
+        assertThat(beforeLock.completedSteps).isEmpty()
+        assertThat(beforeLock.holdStillState).isEqualTo(HoldStillState.CANDIDATE)
+
+        val locked =
+            machine.onFrameEvaluated(
+                candidate(step = CaptureStep.BACK_OF_HAND, qualityScore = 0.88f, motionScore = 0.70f),
+                timestampMs = 380L,
+                isBucketStable = true,
+            )
+
+        assertThat(locked.completedSteps).hasSize(1)
+        assertThat(locked.completedSteps.first().step).isEqualTo(CaptureStep.BACK_OF_HAND)
+        assertThat(locked.holdStillState).isEqualTo(HoldStillState.CAPTURED)
+    }
+
+    @Test
+    fun autoCapture_commitsBestFrameFromRecentWindow_notJustLastFrame() {
+        val machine = HandMeasureStateMachine(thresholds = thresholds, stepDefinitions = steps)
+
+        machine.onFrameEvaluated(
+            candidate(step = CaptureStep.BACK_OF_HAND, qualityScore = 0.86f, motionScore = 0.72f),
+            timestampMs = 0L,
+            isBucketStable = true,
+        )
+        machine.onFrameEvaluated(
+            candidate(step = CaptureStep.BACK_OF_HAND, qualityScore = 0.93f, motionScore = 0.71f),
+            timestampMs = 170L,
+            isBucketStable = true,
+        )
+        val state =
+            machine.onFrameEvaluated(
+                candidate(step = CaptureStep.BACK_OF_HAND, qualityScore = 0.88f, motionScore = 0.73f),
+                timestampMs = 360L,
+                isBucketStable = true,
+            )
+
+        val captured = state.completedSteps.single { it.step == CaptureStep.BACK_OF_HAND }
+        assertThat(captured.qualityScore).isWithin(1e-4f).of(0.93f)
+    }
+
     private fun candidate(
         step: CaptureStep,
         qualityScore: Float,
+        motionScore: Float = 0.7f,
     ): StepCandidate =
         StepCandidate(
             step = step,
@@ -91,5 +167,6 @@ class HandMeasureStateMachineTest {
             poseScore = qualityScore,
             cardScore = qualityScore,
             handScore = qualityScore,
+            motionScore = motionScore,
         )
 }

@@ -7,6 +7,7 @@
 - Added internal `TryOnEngine` (`com.handtryon.engine.TryOnEngine`).
 - Kept internal engine request model (`com.handtryon.engine.model.TryOnEngineRequest`).
 - Added mapper/adaptation layer (`com.handtryon.engine.compat.TryOnEngineDomainMapper`).
+- Added shared runtime-state mapper (`com.handtryon.engine.compat.TryOnRuntimeStateMapper`) for domain/core tracking-action conversions.
 - Existing public compatibility entry `TryOnSessionResolver` now delegates to `TryOnEngine`.
 
 ### 2) First portable extraction in `:handtryon-core`
@@ -16,6 +17,7 @@
   - `TryOnSessionResolverPolicy`
   - `TryOnTrackingStateMachinePolicy`
   - `TryOnQualityPolicy`
+  - `TryOnOcclusionPolicy`
   - `TemporalPlacementSmootherPolicy`
   - `PlacementValidationPolicy`
   - `DefaultFingerAnchorFactory`
@@ -25,6 +27,7 @@
 ### 3) Compatibility adapters in `:HandTryOn`
 
 - `DefaultFingerAnchorProvider`, `TemporalPlacementSmoother`, and `PlacementValidator` now delegate to `:handtryon-core` logic through mapper-based adapters.
+- Runtime state conversion helpers are normalized through `TryOnRuntimeStateMapper` instead of duplicated inline mappings.
 
 ### 4) Engine/result boundary cleanup in `:HandTryOn`
 
@@ -100,6 +103,27 @@
   - `Hide`
 - `TryOnEngineRenderState` and compatibility `TryOnRenderState` now carry tracking/quality/update metadata (`trackingState`, `qualityScore`, `updateAction`, `hints`, `shouldRenderOverlay`) while keeping `Bitmap` output Android-side.
 - `StableRingOverlayRenderer` remains Android-only and consumes compatibility render-state metadata without moving renderer concerns into `:handtryon-core`.
+
+## Phase 2 normalization status (current)
+
+- Normalized compatibility conversion responsibilities:
+  - shared runtime state mapper extracted to `TryOnRuntimeStateMapper`
+  - touched adapters now use one conversion source for tracking/update enums
+- Kept normalization scoped to touched HandTryOn runtime-stability paths only:
+  - no broad package sweep
+  - no renderer stack replacement
+  - no UI/UX redesign.
+
+## Phase 3 lightweight occlusion status (current)
+
+- Added Android-free occlusion decision policy in `:handtryon-core`:
+  - `TryOnOcclusionPolicy` -> `TryOnOcclusionDecision`
+  - decision inputs: mode, tracking state, update action, quality score
+- Added Android-side mask implementation in `:HandTryOn`:
+  - `LightweightRingOcclusionMaskProvider`
+  - applies a thin DST_OUT occlusion band aligned to ring orientation
+  - degrades by reducing/disabling mask when quality/state is weak
+- `StableRingOverlayRenderer` now wires runtime state + quality into occlusion context while keeping `TryOnRenderResult` bitmap output unchanged.
 
 ## What is still future work after Phase 1
 

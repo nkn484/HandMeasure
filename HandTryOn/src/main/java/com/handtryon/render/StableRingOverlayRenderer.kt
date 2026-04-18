@@ -20,7 +20,7 @@ class StableRingOverlayRenderer internal constructor(
     private val occlusionMaskProvider: OcclusionMaskProvider?,
 ) {
     constructor(
-        occlusionMaskProvider: OcclusionMaskProvider? = null,
+        occlusionMaskProvider: OcclusionMaskProvider? = LightweightRingOcclusionMaskProvider(),
     ) : this(
         smoother = TemporalPlacementSmoother(),
         validator = PlacementValidator(),
@@ -51,6 +51,7 @@ class StableRingOverlayRenderer internal constructor(
         qualityScore: Float = anchor?.confidence ?: 0.62f,
         trackingState: TryOnTrackingState = if (anchor == null) TryOnTrackingState.Recovering else TryOnTrackingState.Locked,
         updateAction: TryOnUpdateAction = TryOnUpdateAction.Update,
+        mode: TryOnMode = TryOnMode.LandmarkOnly,
     ): RingPlacement {
         val deltaMs = if (lastTimestampMs == 0L) 16L else (nowMs - lastTimestampMs).coerceAtLeast(1L)
         val stablePlacement =
@@ -71,7 +72,17 @@ class StableRingOverlayRenderer internal constructor(
             }
 
         drawContactShadow(canvas, safePlacement)
-        drawRing(canvas, ringBitmap, safePlacement, alpha = alpha)
+        drawRing(
+            canvas = canvas,
+            ringBitmap = ringBitmap,
+            placement = safePlacement,
+            alpha = alpha,
+            mode = mode,
+            qualityScore = qualityScore,
+            trackingState = trackingState,
+            updateAction = updateAction,
+            frameWidth = frameWidth,
+        )
         lastPlacement = safePlacement
         lastTimestampMs = nowMs
         return safePlacement
@@ -114,6 +125,7 @@ class StableRingOverlayRenderer internal constructor(
                 qualityScore = qualityScore,
                 trackingState = trackingState,
                 updateAction = updateAction,
+                mode = mode,
             )
         val validation = validator.validate(stablePlacement, anchor, previousPlacement, baseFrame.width)
         return TryOnRenderResult(
@@ -148,7 +160,22 @@ class StableRingOverlayRenderer internal constructor(
         ringBitmap: Bitmap,
         placement: RingPlacement,
         alpha: Int,
+        mode: TryOnMode,
+        qualityScore: Float,
+        trackingState: TryOnTrackingState,
+        updateAction: TryOnUpdateAction,
+        frameWidth: Int,
     ) {
+        val ringAspectRatio = ringBitmap.width.coerceAtLeast(1).toFloat() / ringBitmap.height.coerceAtLeast(1).toFloat()
+        val layerPadding = placement.ringWidthPx * 0.7f
+        val layerCount =
+            canvas.saveLayer(
+                placement.centerX - layerPadding,
+                placement.centerY - layerPadding,
+                placement.centerX + layerPadding,
+                placement.centerY + layerPadding,
+                null,
+            )
         val scale = placement.ringWidthPx / ringBitmap.width.coerceAtLeast(1).toFloat()
         ringPaint.alpha = alpha.coerceIn(0, 255)
         canvas.save()
@@ -157,8 +184,22 @@ class StableRingOverlayRenderer internal constructor(
         canvas.scale(scale, scale)
         canvas.translate(-ringBitmap.width * 0.5f, -ringBitmap.height * 0.5f)
         canvas.drawBitmap(ringBitmap, 0f, 0f, ringPaint)
-        occlusionMaskProvider?.applyOcclusion(canvas, placement, ringPaint)
         canvas.restore()
+        val context =
+            OcclusionMaskContext(
+                mode = mode,
+                qualityScore = qualityScore,
+                trackingState = trackingState,
+                updateAction = updateAction,
+                ringBitmapAspectRatio = ringAspectRatio,
+                frameWidth = frameWidth,
+            )
+        when (val provider = occlusionMaskProvider) {
+            is ContextAwareOcclusionMaskProvider -> provider.applyOcclusion(canvas, placement, ringPaint, context)
+            null -> Unit
+            else -> provider.applyOcclusion(canvas, placement, ringPaint)
+        }
+        canvas.restoreToCount(layerCount)
     }
 
     private fun drawContactShadow(

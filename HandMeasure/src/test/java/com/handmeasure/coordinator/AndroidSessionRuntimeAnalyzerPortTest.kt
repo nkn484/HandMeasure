@@ -18,7 +18,10 @@ import com.handmeasure.core.session.SessionScale
 import com.handmeasure.core.session.SessionScaleDiagnostics
 import com.handmeasure.core.session.SessionScaleResult
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+@RunWith(RobolectricTestRunner::class)
 class AndroidSessionRuntimeAnalyzerPortTest {
     @Test
     fun runtimePort_delegatesToFocusedAdapters() {
@@ -127,7 +130,11 @@ class AndroidSessionRuntimeAnalyzerPortTest {
         assertThat(port.extractCardDiagnostics(card)).isEqualTo(cardDiagnostics)
         assertThat(port.calibrateScale(card)).isEqualTo(scaleResult)
         assertThat(port.measureFingerWidth(bitmap, hand, TargetFinger.RING, SessionScale(0.11, 0.12))).isEqualTo(measurement)
-        assertThat(port.encodeOverlay(CaptureStep.FRONT_PALM, bitmap, hand, card)?.toList()).containsExactly(1, 2, 3).inOrder()
+        assertThat(
+            port
+                .encodeOverlay(CaptureStep.FRONT_PALM, bitmap, hand, card)
+                ?.toList(),
+        ).containsExactly(1.toByte(), 2.toByte(), 3.toByte()).inOrder()
 
         assertThat(handCalls).isEqualTo(1)
         assertThat(cardCalls).isEqualTo(1)
