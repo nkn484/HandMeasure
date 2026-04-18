@@ -35,6 +35,9 @@ class TryOnEngineTest {
         assertThat(result.renderState.generatedAtMs).isEqualTo(1234L)
         assertThat(result.renderState.anchor).isEqualTo(result.session.anchor)
         assertThat(result.renderState.placement).isEqualTo(result.session.placement)
+        assertThat(result.renderState.trackingState).isEqualTo(result.session.quality.trackingState)
+        assertThat(result.renderState.qualityScore).isEqualTo(result.session.quality.qualityScore)
+        assertThat(result.renderState.updateAction).isEqualTo(result.session.quality.updateAction)
     }
 
     @Test

@@ -18,6 +18,11 @@ data class TryOnEngineRenderState(
     val mode: TryOnMode,
     val anchor: TryOnFingerAnchor?,
     val placement: TryOnPlacement,
+    val trackingState: TryOnTrackingState = TryOnTrackingState.Searching,
+    val qualityScore: Float = 0f,
+    val updateAction: TryOnUpdateAction = TryOnUpdateAction.Update,
+    val hints: List<String> = emptyList(),
+    val shouldRenderOverlay: Boolean = true,
     val generatedAtMs: Long,
 )
 
@@ -37,6 +42,11 @@ fun TryOnSession.toEngineResult(generatedAtMs: Long = updatedAtMs): TryOnEngineR
                 mode = mode,
                 anchor = anchor,
                 placement = placement,
+                trackingState = quality.trackingState,
+                qualityScore = quality.qualityScore,
+                updateAction = quality.updateAction,
+                hints = quality.hints,
+                shouldRenderOverlay = quality.updateAction != TryOnUpdateAction.Hide,
                 generatedAtMs = generatedAtMs,
             ),
     )

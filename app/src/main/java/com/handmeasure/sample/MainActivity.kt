@@ -95,24 +95,24 @@ private fun DemoLandingScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
-            text = "HandMeasure + HandTryOn Internal Demo",
+            text = "Bản demo nội bộ HandMeasure + HandTryOn",
             style = MaterialTheme.typography.headlineSmall,
         )
         Text(
-            text = "Choose a demo path:",
+            text = "Chọn luồng demo:",
             style = MaterialTheme.typography.bodyMedium,
         )
         Button(onClick = onOpenMeasure, modifier = Modifier.fillMaxWidth()) {
-            Text("Launch HandMeasure Demo")
+            Text("Mở demo HandMeasure")
         }
         Button(onClick = onOpenTryOn, modifier = Modifier.fillMaxWidth()) {
-            Text("Launch HandTryOn Demo")
+            Text("Mở demo HandTryOn")
         }
         Button(onClick = onOpenMeasureThenTryOn, modifier = Modifier.fillMaxWidth()) {
-            Text("Launch Measure -> TryOn Flow")
+            Text("Mở luồng Đo tay -> Thử nhẫn")
         }
         Text(
-            text = "Measure -> TryOn auto-starts measurement and applies a simulated handoff if measurement is canceled.",
+            text = "Luồng Đo tay -> Thử nhẫn sẽ tự mở bước đo, và dùng dữ liệu mô phỏng nếu bạn hủy đo.",
             style = MaterialTheme.typography.bodySmall,
         )
     }

@@ -10,6 +10,8 @@ import com.handtryon.domain.RingPlacement
 import com.handtryon.domain.TryOnInputQuality
 import com.handtryon.domain.TryOnMode
 import com.handtryon.domain.TryOnSession
+import com.handtryon.domain.TryOnTrackingState
+import com.handtryon.domain.TryOnUpdateAction
 import com.handtryon.coreengine.model.TryOnEngineRenderState
 import com.handtryon.coreengine.model.TryOnEngineResult
 import com.handtryon.coreengine.model.TryOnEngineSessionState
@@ -156,6 +158,9 @@ class TryOnEngineDomainMapperTest {
         assertThat(renderState.mode).isEqualTo(TryOnMode.Manual)
         assertThat(renderState.placement.ringWidthPx).isEqualTo(66f)
         assertThat(renderState.generatedAtMs).isEqualTo(3000L)
+        assertThat(renderState.trackingState).isEqualTo(TryOnTrackingState.Searching)
+        assertThat(renderState.updateAction).isEqualTo(TryOnUpdateAction.Update)
+        assertThat(renderState.shouldRenderOverlay).isTrue()
         assertThat(resolution.session.mode).isEqualTo(TryOnMode.Manual)
         assertThat(resolution.renderState).isEqualTo(renderState)
     }

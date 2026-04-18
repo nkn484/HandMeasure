@@ -10,13 +10,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import com.handtryon.domain.FingerAnchor
 import com.handtryon.domain.RingPlacement
+import com.handtryon.domain.TryOnMode
+import com.handtryon.domain.TryOnTrackingState
+import com.handtryon.domain.TryOnUpdateAction
 import com.handtryon.render.PreviewCoordinateMapper
 import com.handtryon.render.StableRingOverlayRenderer
 
@@ -28,6 +30,10 @@ fun TryOnOverlay(
     placement: RingPlacement?,
     anchor: FingerAnchor?,
     renderer: StableRingOverlayRenderer,
+    mode: TryOnMode = TryOnMode.LandmarkOnly,
+    qualityScore: Float = anchor?.confidence ?: 0.62f,
+    trackingState: TryOnTrackingState = if (anchor == null) TryOnTrackingState.Recovering else TryOnTrackingState.Locked,
+    updateAction: TryOnUpdateAction = TryOnUpdateAction.Update,
     manualAdjustEnabled: Boolean,
     onManualTransform: (panXFrame: Float, panYFrame: Float, zoom: Float, rotationDeg: Float) -> Unit,
     modifier: Modifier = Modifier,
@@ -71,6 +77,10 @@ fun TryOnOverlay(
                 )
             },
             frameWidth = viewportWidth.coerceAtLeast(1),
+            mode = mode,
+            qualityScore = qualityScore,
+            trackingState = trackingState,
+            updateAction = updateAction,
         )
     }
 }

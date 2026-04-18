@@ -13,7 +13,10 @@ import com.handmeasure.core.session.SessionFingerMeasurementPort
 import com.handmeasure.core.session.SessionFingerMeasurementRequest
 import com.handmeasure.core.session.SessionScale
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+@RunWith(RobolectricTestRunner::class)
 class AndroidFingerRuntimeAdapterTest {
     @Test
     fun measure_buildsCoreRequestAndDelegatesToPort() {

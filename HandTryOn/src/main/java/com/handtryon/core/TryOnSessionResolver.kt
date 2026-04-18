@@ -9,10 +9,15 @@ import com.handtryon.engine.TryOnEngine
 import com.handtryon.engine.compat.TryOnEngineDomainMapper
 import com.handtryon.engine.factory.TryOnEngineFactory
 
-class TryOnSessionResolver(
-    private val engine: TryOnEngine = TryOnEngineFactory.create(),
-    private val mapper: TryOnEngineDomainMapper = TryOnEngineDomainMapper(),
+class TryOnSessionResolver internal constructor(
+    private val engine: TryOnEngine,
+    private val mapper: TryOnEngineDomainMapper,
 ) {
+    constructor() : this(
+        engine = TryOnEngineFactory.create(),
+        mapper = TryOnEngineDomainMapper(),
+    )
+
     fun resolve(
         asset: RingAssetSource,
         handPose: HandPoseSnapshot?,

@@ -345,3 +345,43 @@ New unit tests in `:handmeasure-core`:
 - Existing Android runtime/render/UI flow remains in `:HandTryOn`.
 - `TryOnRenderResult` remains Android-side by design because it contains `Bitmap`.
 - Existing mode/fallback/smoothing/validation semantics are preserved via delegation adapters.
+
+## Phase 12 update: HandMeasure capture-flow stability protocol
+
+### Capture protocol behavior shift
+
+- HandMeasure runtime capture no longer depends on strict user-driven step order.
+- Frames are continuously analyzed and auto-bucketed to protocol categories using orientation-range classification with hysteresis.
+- Existing backend/session categories are preserved (`BACK/LEFT/RIGHT/UP/DOWN` variants by protocol).
+
+### New platform-neutral capture policies in `:handmeasure-core`
+
+- `OrientationBucketClassifier` for tolerant bucket classification + hysteresis.
+- `RollingCandidateWindow` for short per-bucket best-of-window selection.
+- `HoldStillCaptureController` for explicit lock-before-commit state flow.
+- `CaptureRetryReasonPolicy` for deterministic retry guidance mapping from runtime signals.
+- `AdaptiveCaptureProtocolAdvisor` for runtime protocol-strength assessment (`FAST_PREVIEW` / `STANDARD` / `PRECISE`).
+
+### Android integration points in `:HandMeasure`
+
+- `HandMeasureCoordinator` now wires:
+  - live bucket classification from palm normal vectors
+  - per-frame routing into bucket-aware state machine updates
+  - retry-reason policy mapping into user-facing hint keys
+- `HandMeasureStateMachine` now:
+  - tracks bucketed candidates instead of strict sequential-only acceptance
+  - applies rolling-window selection and hold-still locking before auto-capture commit
+  - preserves manual best-candidate progression and retry controls
+  - keeps engine-facing captured step payloads compatible with existing finalization flow
+
+### Boundary status after this phase
+
+- Android-only concerns remain Android-side:
+  - `Bitmap`, CameraX analyzers, MediaPipe/OpenCV execution, Compose/UI rendering
+- Capture policies/state math remain platform-neutral in `:handmeasure-core`.
+- Public Android API contracts remain unchanged.
+
+### Remaining work
+
+- Adaptive protocol assessment is currently diagnostic/state-level only.
+- Future phase can safely introduce configurable early-complete behavior once product confidence gates are validated.

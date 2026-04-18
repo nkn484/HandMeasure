@@ -40,7 +40,7 @@ class StepRuntimeAnalysisUseCaseTest {
         assertThat(result.scaleResult?.scale?.mmPerPxX).isEqualTo(0.09)
         assertThat(result.measurement?.widthMm).isEqualTo(17.5)
         assertThat(result.overlayFrame?.stepName).isEqualTo(CaptureStep.FRONT_PALM.name)
-        assertThat(result.overlayFrame?.jpegBytes?.toList()).containsExactly(9, 8, 7).inOrder()
+        assertThat(result.overlayFrame?.jpegBytes?.toList()).containsExactly(9.toByte(), 8.toByte(), 7.toByte()).inOrder()
         assertThat(port.lastMeasuredScale).isEqualTo(SessionScale(mmPerPxX = 0.09, mmPerPxY = 0.1))
         assertThat(port.overlayCalls).isEqualTo(1)
     }

@@ -2,22 +2,12 @@ package com.handtryon.coreengine
 
 import com.google.common.truth.Truth.assertThat
 import com.handtryon.coreengine.model.TryOnPlacement
+import com.handtryon.coreengine.model.TryOnTrackingState
+import com.handtryon.coreengine.model.TryOnUpdateAction
 import org.junit.Test
 
 class TemporalPlacementSmootherPolicyTest {
     private val smoother = TemporalPlacementSmootherPolicy()
-
-    @Test
-    fun smoothes_toward_raw_values() {
-        val previous = TryOnPlacement(centerX = 100f, centerY = 100f, ringWidthPx = 80f, rotationDegrees = 5f)
-        val raw = TryOnPlacement(centerX = 200f, centerY = 180f, ringWidthPx = 120f, rotationDegrees = 35f)
-        val smoothed = smoother.smooth(raw = raw, previous = previous, deltaMs = 50L)
-
-        assertThat(smoothed.centerX).isGreaterThan(previous.centerX)
-        assertThat(smoothed.centerX).isLessThan(raw.centerX)
-        assertThat(smoothed.ringWidthPx).isGreaterThan(previous.ringWidthPx)
-        assertThat(smoothed.ringWidthPx).isLessThan(raw.ringWidthPx)
-    }
 
     @Test
     fun returns_raw_when_no_previous_sample() {
@@ -29,25 +19,114 @@ class TemporalPlacementSmootherPolicyTest {
     }
 
     @Test
-    fun alpha_is_clamped_by_delta_time_window() {
-        val previous = TryOnPlacement(centerX = 0f, centerY = 0f, ringWidthPx = 100f, rotationDegrees = 0f)
-        val raw = TryOnPlacement(centerX = 100f, centerY = 100f, ringWidthPx = 200f, rotationDegrees = 100f)
+    fun applies_stronger_smoothing_for_small_movement_high_quality_locked_tracking() {
+        val previous = TryOnPlacement(centerX = 100f, centerY = 100f, ringWidthPx = 80f, rotationDegrees = 5f)
+        val raw = TryOnPlacement(centerX = 110f, centerY = 108f, ringWidthPx = 84f, rotationDegrees = 9f)
 
-        val minDeltaSmoothed = smoother.smooth(raw = raw, previous = previous, deltaMs = 1L)
-        val maxDeltaSmoothed = smoother.smooth(raw = raw, previous = previous, deltaMs = 500L)
+        val lockedHighQuality =
+            smoother.smooth(
+                raw = raw,
+                previous = previous,
+                deltaMs = 50L,
+                context =
+                    TryOnSmoothingContext(
+                        qualityScore = 0.9f,
+                        trackingState = TryOnTrackingState.Locked,
+                        updateAction = TryOnUpdateAction.Update,
+                    ),
+            )
+        val noisyLowQuality =
+            smoother.smooth(
+                raw = raw,
+                previous = previous,
+                deltaMs = 50L,
+                context =
+                    TryOnSmoothingContext(
+                        qualityScore = 0.35f,
+                        trackingState = TryOnTrackingState.Candidate,
+                        updateAction = TryOnUpdateAction.Update,
+                    ),
+            )
 
-        assertThat(minDeltaSmoothed.centerX).isEqualTo(18f)
-        assertThat(maxDeltaSmoothed.centerX).isEqualTo(42f)
+        val lockedDelta = lockedHighQuality.centerX - previous.centerX
+        val noisyDelta = noisyLowQuality.centerX - previous.centerX
+        assertThat(lockedDelta).isLessThan(noisyDelta)
     }
 
     @Test
-    fun handles_rotation_wraparound_on_shortest_path() {
-        val previous = TryOnPlacement(centerX = 0f, centerY = 0f, ringWidthPx = 90f, rotationDegrees = 175f)
-        val raw = TryOnPlacement(centerX = 0f, centerY = 0f, ringWidthPx = 90f, rotationDegrees = -176f)
+    fun reduces_smoothing_in_recovery_to_avoid_visible_lag() {
+        val previous = TryOnPlacement(centerX = 100f, centerY = 100f, ringWidthPx = 80f, rotationDegrees = 5f)
+        val raw = TryOnPlacement(centerX = 220f, centerY = 190f, ringWidthPx = 112f, rotationDegrees = 28f)
 
-        val smoothed = smoother.smooth(raw = raw, previous = previous, deltaMs = 90L)
+        val locked =
+            smoother.smooth(
+                raw = raw,
+                previous = previous,
+                deltaMs = 50L,
+                context =
+                    TryOnSmoothingContext(
+                        qualityScore = 0.9f,
+                        trackingState = TryOnTrackingState.Locked,
+                        updateAction = TryOnUpdateAction.Update,
+                    ),
+            )
+        val recovering =
+            smoother.smooth(
+                raw = raw,
+                previous = previous,
+                deltaMs = 50L,
+                context =
+                    TryOnSmoothingContext(
+                        qualityScore = 0.45f,
+                        trackingState = TryOnTrackingState.Recovering,
+                        updateAction = TryOnUpdateAction.Recover,
+                    ),
+            )
 
-        assertThat(smoothed.rotationDegrees).isGreaterThan(175f)
-        assertThat(smoothed.rotationDegrees).isLessThan(180f)
+        assertThat(recovering.centerX - previous.centerX).isGreaterThan(locked.centerX - previous.centerX)
+    }
+
+    @Test
+    fun freeze_scale_rotation_only_updates_center() {
+        val previous = TryOnPlacement(centerX = 100f, centerY = 100f, ringWidthPx = 80f, rotationDegrees = 5f)
+        val raw = TryOnPlacement(centerX = 170f, centerY = 150f, ringWidthPx = 110f, rotationDegrees = 32f)
+
+        val smoothed =
+            smoother.smooth(
+                raw = raw,
+                previous = previous,
+                deltaMs = 45L,
+                context =
+                    TryOnSmoothingContext(
+                        qualityScore = 0.58f,
+                        trackingState = TryOnTrackingState.Locked,
+                        updateAction = TryOnUpdateAction.FreezeScaleRotation,
+                    ),
+            )
+
+        assertThat(smoothed.centerX).isGreaterThan(previous.centerX)
+        assertThat(smoothed.ringWidthPx).isEqualTo(previous.ringWidthPx)
+        assertThat(smoothed.rotationDegrees).isEqualTo(previous.rotationDegrees)
+    }
+
+    @Test
+    fun hold_action_returns_previous_placement() {
+        val previous = TryOnPlacement(centerX = 100f, centerY = 100f, ringWidthPx = 80f, rotationDegrees = 5f)
+        val raw = TryOnPlacement(centerX = 210f, centerY = 170f, ringWidthPx = 115f, rotationDegrees = 35f)
+
+        val smoothed =
+            smoother.smooth(
+                raw = raw,
+                previous = previous,
+                deltaMs = 80L,
+                context =
+                    TryOnSmoothingContext(
+                        qualityScore = 0.3f,
+                        trackingState = TryOnTrackingState.Recovering,
+                        updateAction = TryOnUpdateAction.HoldLastPlacement,
+                    ),
+            )
+
+        assertThat(smoothed).isEqualTo(previous)
     }
 }

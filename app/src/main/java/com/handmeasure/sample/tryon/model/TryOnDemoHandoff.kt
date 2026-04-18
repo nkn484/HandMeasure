@@ -31,11 +31,11 @@ fun handoffFromHandMeasureResult(result: HandMeasureResult): TryOnDemoHandoff {
         )
     return TryOnDemoHandoff(
         snapshot = snapshot,
-        sourceLabel = "Live HandMeasure result",
+        sourceLabel = "Kết quả HandMeasure trực tiếp",
         summary =
             String.format(
                 Locale.US,
-                "Handoff: live size %s, diameter %.2fmm, confidence %.2f",
+                "Handoff: size live %s, đường kính %.2f mm, độ tin cậy %.2f",
                 result.suggestedRingSizeLabel,
                 result.equivalentDiameterMm,
                 result.confidenceScore,
@@ -54,8 +54,8 @@ fun sampleTryOnDemoHandoff(): TryOnDemoHandoff {
         )
     return TryOnDemoHandoff(
         snapshot = snapshot,
-        sourceLabel = "Simulated handoff",
-        summary = "Handoff: simulated sample (diameter 16.20mm, confidence 0.75)",
+        sourceLabel = "Handoff mô phỏng",
+        summary = "Handoff: mẫu mô phỏng (đường kính 16.20 mm, độ tin cậy 0.75)",
     )
 }
 

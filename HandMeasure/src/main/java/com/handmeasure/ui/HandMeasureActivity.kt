@@ -270,10 +270,10 @@ private fun CaptureScreen(
             StatusPanel(captureState = captureState, analysisState = analysisState, onClose = onClose)
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(onClick = onRetry, enabled = captureState.bestCurrentCandidate != null) {
-                    Text("Retake step")
+                    Text("Chụp lại bước")
                 }
                 Button(onClick = onUseBestFrame, enabled = captureState.canAdvanceWithBest) {
-                    Text("Use best frame")
+                    Text("Dùng khung hình tốt nhất")
                 }
             }
         }
@@ -342,13 +342,13 @@ private fun StatusPanel(
                 Text(text = stringResource(id = step.hintResId()), color = Color.White, style = MaterialTheme.typography.bodyMedium)
             }
             Spacer(modifier = Modifier.width(12.dp))
-            Button(onClick = onClose) { Text("Close") }
+            Button(onClick = onClose) { Text("Đóng") }
         }
         Spacer(modifier = Modifier.height(12.dp))
         LinearProgressIndicator(progress = { captureState.progressFraction }, modifier = Modifier.fillMaxWidth())
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "Completed ${captureState.completedSteps.size}/${captureState.totalSteps} steps",
+            text = "Hoàn thành ${captureState.completedSteps.size}/${captureState.totalSteps} bước",
             color = Color.White,
             style = MaterialTheme.typography.bodyMedium,
         )
@@ -356,12 +356,12 @@ private fun StatusPanel(
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text =
-                    "quality=${state.qualityScore.format2()} detect=${state.detectionConfidence.format2()} pose=${state.poseConfidence.format2()} measure=${state.measurementConfidence.format2()} card=${state.cardScore.format2()} blur=${state.blurScore.format2()} motion=${state.motionScore.format2()} light=${state.lightingScore.format2()}",
+                    "chất lượng=${state.qualityScore.format2()} nhận diện=${state.detectionConfidence.format2()} tư thế=${state.poseConfidence.format2()} đo=${state.measurementConfidence.format2()} thẻ=${state.cardScore.format2()} mờ=${state.blurScore.format2()} chuyển động=${state.motionScore.format2()} sáng=${state.lightingScore.format2()}",
                 color = Color(0xFFE0E0E0),
                 style = MaterialTheme.typography.bodySmall,
             )
             state.poseGuidanceHint?.let {
-                Text(text = "Hint: $it", color = Color(0xFFFFE082), style = MaterialTheme.typography.bodySmall)
+                Text(text = "Gợi ý: $it", color = Color(0xFFFFE082), style = MaterialTheme.typography.bodySmall)
             }
         }
     }
@@ -376,9 +376,9 @@ private fun ProcessingScreen() {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             CircularProgressIndicator(modifier = Modifier.size(48.dp), color = Color(0xFFF2AA4C))
             Spacer(modifier = Modifier.height(16.dp))
-            Text("Calculating finger size", color = Color.White, style = MaterialTheme.typography.titleLarge)
+            Text("Đang tính size ngón tay", color = Color.White, style = MaterialTheme.typography.titleLarge)
             Spacer(modifier = Modifier.height(8.dp))
-            Text("Using the best frames from all guided angles.", color = Color(0xFFD0D0D0), style = MaterialTheme.typography.bodyMedium)
+            Text("Đang dùng các khung hình tốt nhất từ mọi góc hướng dẫn.", color = Color(0xFFD0D0D0), style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
@@ -394,35 +394,35 @@ private fun ResultScreen(result: HandMeasureResult?, onDone: () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("Measurement result", style = MaterialTheme.typography.headlineMedium)
+            Text("Kết quả đo", style = MaterialTheme.typography.headlineMedium)
             if (result == null) {
-                Text("No result produced.", style = MaterialTheme.typography.bodyLarge)
+                Text("Không tạo được kết quả.", style = MaterialTheme.typography.bodyLarge)
             } else {
-                Text("Suggested ring size: ${result.suggestedRingSizeLabel}", style = MaterialTheme.typography.titleLarge)
-                Text("Width: ${result.fingerWidthMm.format2()} mm")
-                Text("Thickness: ${result.fingerThicknessMm.format2()} mm")
-                Text("Circumference: ${result.estimatedCircumferenceMm.format2()} mm")
-                Text("Equivalent diameter: ${result.equivalentDiameterMm.format2()} mm")
-                Text("Confidence: ${result.confidenceScore.format2()}")
-                Text("Captured steps: ${result.capturedSteps.size}")
-                Text("Mode: ${result.resultMode} | Quality: ${result.qualityLevel}")
-                Text("Calibration: ${result.calibrationStatus} | Retry recommended: ${result.retryRecommended}")
-                val warningsText = if (result.warnings.isEmpty()) "none" else result.warnings.joinToString()
+                Text("Size nhẫn gợi ý: ${result.suggestedRingSizeLabel}", style = MaterialTheme.typography.titleLarge)
+                Text("Chiều rộng: ${result.fingerWidthMm.format2()} mm")
+                Text("Độ dày: ${result.fingerThicknessMm.format2()} mm")
+                Text("Chu vi: ${result.estimatedCircumferenceMm.format2()} mm")
+                Text("Đường kính tương đương: ${result.equivalentDiameterMm.format2()} mm")
+                Text("Độ tin cậy: ${result.confidenceScore.format2()}")
+                Text("Số bước đã chụp: ${result.capturedSteps.size}")
+                Text("Chế độ: ${result.resultMode.toVietnameseLabel()} | Chất lượng: ${result.qualityLevel.toVietnameseLabel()}")
+                Text("Hiệu chuẩn: ${result.calibrationStatus.toVietnameseLabel()} | Nên đo lại: ${result.retryRecommended.toVietnameseLabel()}")
+                val warningsText = if (result.warnings.isEmpty()) "không có" else result.warnings.joinToString { it.toVietnameseLabel() }
                 Text(
-                    "Warnings: $warningsText",
+                    "Cảnh báo: $warningsText",
                     color = Color(0xFF8A4B08),
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 if (result.retryRecommended) {
                     Text(
-                        "Result is best-effort. Retaking under steadier conditions is recommended.",
+                        "Kết quả hiện là ước tính tốt nhất có thể. Nên đo lại trong điều kiện ổn định hơn.",
                         color = Color(0xFF8A4B08),
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
             }
             Spacer(modifier = Modifier.height(8.dp))
-            Button(onClick = onDone) { Text("Done") }
+            Button(onClick = onDone) { Text("Xong") }
         }
     }
 }
@@ -465,6 +465,10 @@ private fun PoseGuidanceHintKey.toResId(): Int =
         PoseGuidanceHintKey.PLACE_CARD_NEAR_FINGER -> R.string.pose_hint_place_card_near_finger
         PoseGuidanceHintKey.ADJUST_HAND_POSE -> R.string.pose_hint_adjust_hand_pose
         PoseGuidanceHintKey.HOLD_HAND_STEADY -> R.string.pose_hint_hold_hand_steady
+        PoseGuidanceHintKey.WAIT_FOR_LOCK -> R.string.pose_hint_wait_for_lock
+        PoseGuidanceHintKey.REDUCE_GLARE -> R.string.pose_hint_reduce_glare
+        PoseGuidanceHintKey.KEEP_HAND_AND_CARD_CLOSER -> R.string.pose_hint_keep_hand_card_closer
+        PoseGuidanceHintKey.TRACKING_UNSTABLE -> R.string.pose_hint_tracking_unstable
         PoseGuidanceHintKey.FRAME_HAND_CLEARER -> R.string.pose_hint_frame_hand_clearer
         PoseGuidanceHintKey.ROTATE_LEFT_MORE -> R.string.pose_hint_rotate_left_more
         PoseGuidanceHintKey.ROTATE_RIGHT_MORE -> R.string.pose_hint_rotate_right_more
@@ -501,3 +505,39 @@ private fun buildBestEffortFallbackResult(
         debugMetadata = null,
     )
 }
+
+private fun ResultMode.toVietnameseLabel(): String =
+    when (this) {
+        ResultMode.DIRECT_MEASUREMENT -> "Đo trực tiếp"
+        ResultMode.HYBRID_ESTIMATE -> "Ước tính kết hợp"
+        ResultMode.FALLBACK_ESTIMATE -> "Ước tính dự phòng"
+    }
+
+private fun QualityLevel.toVietnameseLabel(): String =
+    when (this) {
+        QualityLevel.HIGH -> "Cao"
+        QualityLevel.MEDIUM -> "Trung bình"
+        QualityLevel.LOW -> "Thấp"
+    }
+
+private fun CalibrationStatus.toVietnameseLabel(): String =
+    when (this) {
+        CalibrationStatus.CALIBRATED -> "Đã hiệu chuẩn"
+        CalibrationStatus.DEGRADED -> "Suy giảm"
+        CalibrationStatus.MISSING_REFERENCE -> "Thiếu tham chiếu"
+    }
+
+private fun HandMeasureWarning.toVietnameseLabel(): String =
+    when (this) {
+        HandMeasureWarning.BEST_EFFORT_ESTIMATE -> "Ước tính tốt nhất có thể"
+        HandMeasureWarning.LOW_CARD_CONFIDENCE -> "Độ tin cậy thẻ chuẩn thấp"
+        HandMeasureWarning.LOW_POSE_CONFIDENCE -> "Độ tin cậy tư thế thấp"
+        HandMeasureWarning.LOW_LIGHTING -> "Ánh sáng yếu"
+        HandMeasureWarning.HIGH_MOTION -> "Chuyển động cao"
+        HandMeasureWarning.HIGH_BLUR -> "Hình ảnh bị mờ"
+        HandMeasureWarning.THICKNESS_ESTIMATED_FROM_WEAK_ANGLES -> "Độ dày ước tính từ góc chụp yếu"
+        HandMeasureWarning.CALIBRATION_WEAK -> "Hiệu chuẩn yếu"
+        HandMeasureWarning.LOW_RESULT_RELIABILITY -> "Độ tin cậy kết quả thấp"
+    }
+
+private fun Boolean.toVietnameseLabel(): String = if (this) "Có" else "Không"
