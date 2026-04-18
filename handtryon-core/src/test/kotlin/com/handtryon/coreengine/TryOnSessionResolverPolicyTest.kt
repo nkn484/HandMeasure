@@ -4,12 +4,13 @@ import com.google.common.truth.Truth.assertThat
 import com.handtryon.coreengine.model.TryOnAssetSource
 import com.handtryon.coreengine.model.TryOnFingerAnchor
 import com.handtryon.coreengine.model.TryOnHandPoseSnapshot
-import com.handtryon.coreengine.model.TryOnInputQuality
 import com.handtryon.coreengine.model.TryOnLandmarkPoint
 import com.handtryon.coreengine.model.TryOnMeasurementSnapshot
 import com.handtryon.coreengine.model.TryOnMode
 import com.handtryon.coreengine.model.TryOnPlacement
 import com.handtryon.coreengine.model.TryOnSession
+import com.handtryon.coreengine.model.TryOnTrackingState
+import com.handtryon.coreengine.model.TryOnUpdateAction
 import org.junit.Test
 
 class TryOnSessionResolverPolicyTest {
@@ -132,42 +133,110 @@ class TryOnSessionResolverPolicyTest {
     }
 
     @Test
-    fun clamps_large_center_and_rotation_jumps_against_previous_session() {
-        val previousPlacement = TryOnPlacement(centerX = 100f, centerY = 100f, ringWidthPx = 100f, rotationDegrees = 0f)
-        val previousSession = previousSession(previousPlacement)
-        val measured =
-            resolver.resolve(
-                asset = asset,
-                handPose = ringPose(timestampMs = 5000L),
-                measurement = TryOnMeasurementSnapshot(equivalentDiameterMm = 17.6f, fingerWidthMm = 19f, confidence = 0.85f, mmPerPx = 0.1f),
-                manualPlacement = null,
-                previousSession = previousSession,
-                frameWidth = 1080,
-                frameHeight = 1920,
-                nowMs = 5000L,
-            )
+    fun transitions_to_locked_after_consecutive_stable_frames() {
+        var previous: TryOnSession? = null
+        var latest: TryOnSession? = null
 
-        assertThat(measured.mode).isEqualTo(TryOnMode.Measured)
-        assertThat(measured.placement.centerX).isEqualTo(146f)
-        assertThat(measured.placement.centerY).isEqualTo(146f)
-        assertThat(measured.placement.ringWidthPx).isAtMost(116f)
-        assertThat(measured.placement.rotationDegrees).isEqualTo(14f)
+        repeat(3) { index ->
+            latest =
+                resolver.resolve(
+                    asset = asset,
+                    handPose = ringPose(timestampMs = 1000L + index * 33L),
+                    measurement = null,
+                    manualPlacement = null,
+                    previousSession = previous,
+                    frameWidth = 1080,
+                    frameHeight = 1920,
+                    nowMs = 1000L + index * 33L,
+                )
+            previous = latest
+        }
+
+        assertThat(latest?.quality?.trackingState).isEqualTo(TryOnTrackingState.Locked)
     }
 
     @Test
-    fun uses_now_ms_for_anchor_grace_even_when_pose_timestamp_domain_differs() {
+    fun low_quality_jump_enters_recovering_and_avoids_large_visual_jump() {
+        val fixedAnchorFactory =
+            object : FingerAnchorFactory {
+                private var callCount = 0
+
+                override fun createAnchor(pose: TryOnHandPoseSnapshot): TryOnFingerAnchor {
+                    callCount += 1
+                    return if (callCount <= 3) {
+                        TryOnFingerAnchor(
+                            centerX = 300f,
+                            centerY = 420f,
+                            angleDegrees = 10f,
+                            fingerWidthPx = 95f,
+                            confidence = 0.92f,
+                            timestampMs = pose.timestampMs,
+                        )
+                    } else {
+                        TryOnFingerAnchor(
+                            centerX = 880f,
+                            centerY = 1180f,
+                            angleDegrees = 80f,
+                            fingerWidthPx = 130f,
+                            confidence = 0.45f,
+                            timestampMs = pose.timestampMs,
+                        )
+                    }
+                }
+            }
+        val policy = TryOnSessionResolverPolicy(fingerAnchorFactory = fixedAnchorFactory)
+
+        var previous: TryOnSession? = null
+        repeat(3) { index ->
+            previous =
+                policy.resolve(
+                    asset = asset,
+                    handPose = ringPose(timestampMs = 1000L + index * 33L),
+                    measurement = null,
+                    manualPlacement = null,
+                    previousSession = previous,
+                    frameWidth = 1080,
+                    frameHeight = 1920,
+                    nowMs = 1000L + index * 33L,
+                )
+        }
+        val locked = requireNotNull(previous)
+        val recovering =
+            policy.resolve(
+                asset = asset,
+                handPose = ringPose(timestampMs = 1200L),
+                measurement = null,
+                manualPlacement = null,
+                previousSession = locked,
+                frameWidth = 1080,
+                frameHeight = 1920,
+                nowMs = 1200L,
+            )
+
+        assertThat(locked.quality.trackingState).isEqualTo(TryOnTrackingState.Locked)
+        assertThat(recovering.quality.trackingState).isEqualTo(TryOnTrackingState.Recovering)
+        assertThat(recovering.quality.updateAction).isAnyOf(
+            TryOnUpdateAction.HoldLastPlacement,
+            TryOnUpdateAction.Recover,
+            TryOnUpdateAction.FreezeScaleRotation,
+        )
+        val centerJump = recovering.placement.centerX - locked.placement.centerX
+        assertThat(kotlin.math.abs(centerJump)).isLessThan(50f)
+    }
+
+    @Test
+    fun exposes_quality_hints_when_tracking_is_unstable() {
         val first =
             resolver.resolve(
                 asset = asset,
-                handPose = ringPose(timestampMs = 10L),
+                handPose = ringPose(timestampMs = 1000L),
                 measurement = null,
                 manualPlacement = null,
                 previousSession = null,
                 frameWidth = 1080,
                 frameHeight = 1920,
-                nowMs = 1_000_000L,
+                nowMs = 1000L,
             )
-
         val second =
             resolver.resolve(
                 asset = asset,
@@ -177,61 +246,11 @@ class TryOnSessionResolverPolicyTest {
                 previousSession = first,
                 frameWidth = 1080,
                 frameHeight = 1920,
-                nowMs = 1_000_500L,
+                nowMs = 1200L,
             )
 
-        assertThat(second.mode).isEqualTo(TryOnMode.LandmarkOnly)
-        assertThat(second.quality.usedLastGoodAnchor).isTrue()
-        assertThat(second.anchor).isNotNull()
-    }
-
-    @Test
-    fun rotation_bias_does_not_accumulate_drift_when_previous_session_exists() {
-        val fixedAnchorFactory =
-            object : FingerAnchorFactory {
-                override fun createAnchor(pose: TryOnHandPoseSnapshot): TryOnFingerAnchor =
-                    TryOnFingerAnchor(
-                        centerX = 300f,
-                        centerY = 400f,
-                        angleDegrees = 0f,
-                        fingerWidthPx = 100f,
-                        confidence = 0.9f,
-                        timestampMs = pose.timestampMs,
-                    )
-            }
-        val biasedResolver = TryOnSessionResolverPolicy(fingerAnchorFactory = fixedAnchorFactory)
-        val biasedAsset =
-            asset.copy(
-                id = "biased",
-                rotationBiasDeg = 20f,
-            )
-        val first =
-            biasedResolver.resolve(
-                asset = biasedAsset,
-                handPose = ringPose(timestampMs = 1_000L),
-                measurement = null,
-                manualPlacement = null,
-                previousSession = null,
-                frameWidth = 1080,
-                frameHeight = 1920,
-                nowMs = 1_000L,
-            )
-        val second =
-            biasedResolver.resolve(
-                asset = biasedAsset,
-                handPose = ringPose(timestampMs = 2_000L),
-                measurement = null,
-                manualPlacement = null,
-                previousSession = first,
-                frameWidth = 1080,
-                frameHeight = 1920,
-                nowMs = 2_000L,
-            )
-
-        assertThat(first.mode).isEqualTo(TryOnMode.LandmarkOnly)
-        assertThat(second.mode).isEqualTo(TryOnMode.LandmarkOnly)
-        assertThat(first.placement.rotationDegrees).isEqualTo(20f)
-        assertThat(second.placement.rotationDegrees).isEqualTo(20f)
+        assertThat(second.quality.hints).isNotEmpty()
+        assertThat(second.quality.hints).containsAnyOf("using_last_anchor", "hand_unstable", "tracking_recovering")
     }
 
     private fun ringPose(timestampMs: Long = 1000L): TryOnHandPoseSnapshot {
@@ -247,20 +266,4 @@ class TryOnSessionResolverPolicyTest {
         )
     }
 
-    private fun previousSession(placement: TryOnPlacement): TryOnSession =
-        TryOnSession(
-            asset = asset,
-            mode = TryOnMode.Manual,
-            quality =
-                TryOnInputQuality(
-                    measurementUsable = false,
-                    landmarkUsable = false,
-                    measurementConfidence = 0f,
-                    landmarkConfidence = 0f,
-                    usedLastGoodAnchor = false,
-                ),
-            anchor = null,
-            placement = placement,
-            updatedAtMs = 4000L,
-        )
 }

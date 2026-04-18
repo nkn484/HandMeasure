@@ -32,6 +32,8 @@
   - compatibility session+render-state output (`TryOnSessionResolution`)
 - **Portable policy layer (`:handtryon-core`)**
   - `TryOnSessionResolverPolicy`
+  - `TryOnTrackingStateMachinePolicy`
+  - `TryOnQualityPolicy`
   - `TemporalPlacementSmootherPolicy`
   - `PlacementValidationPolicy`
   - `DefaultFingerAnchorFactory`
@@ -43,6 +45,7 @@
 
 - `TryOnEngine` now primarily returns Android-free engine state (`TryOnEngineResult` with session + render state).
 - engine-facing result/session/render contracts live in `:handtryon-core` and are consumed by `:HandTryOn`.
+- runtime tracking state, quality score, and update action are computed in `:handtryon-core` and carried through engine-facing state.
 - `TryOnEngineDomainMapper` explicitly maps engine-facing render/session state to Android compatibility models (`TryOnRenderState`, `TryOnSession`).
 - `StableRingOverlayRenderer` explicitly maps Android compatibility render input (`TryOnRenderState`) to bitmap output (`TryOnRenderResult`).
 - `TryOnRenderState` is Android/public compatibility render input without `Bitmap`.
@@ -61,9 +64,27 @@
 - Baseline boundary tests protect:
   - engine orchestration (`TryOnEngineTest`)
   - session resolver policy (`TryOnSessionResolverPolicyTest`)
+  - tracking state transitions (`TryOnTrackingStateMachinePolicyTest`)
+  - quality scoring/gating decisions (`TryOnQualityPolicyTest`)
   - temporal smoothing policy (`TemporalPlacementSmootherPolicyTest`)
   - placement validation policy (`PlacementValidationPolicyTest`)
   - engine/domain mapper contracts (`TryOnEngineDomainMapperTest`)
+
+## Runtime stability (current)
+
+- Tracking lifecycle is explicit and stateful (`Searching` -> `Candidate` -> `Locked` -> `Recovering`) through `TryOnTrackingStateMachinePolicy`.
+- Quality gating is explicit through `TryOnQualityPolicy` and drives per-frame update action:
+  - `Update`
+  - `FreezeScaleRotation`
+  - `HoldLastPlacement`
+  - `Recover`
+  - `Hide`
+- `TryOnSessionResolverPolicy` integrates:
+  - state transition
+  - quality scoring + gating
+  - adaptive smoothing context
+  - existing fallback semantics (`Measured` / `LandmarkOnly` / `Manual`) without changing mode meaning.
+- Temporal smoothing is now adaptive (movement/quality/state-aware) and separated by center, rotation, and scale behavior.
 
 ## Still future work (not implemented in Phase 1)
 

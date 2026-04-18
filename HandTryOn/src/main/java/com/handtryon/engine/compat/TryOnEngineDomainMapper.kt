@@ -10,6 +10,8 @@ import com.handtryon.coreengine.model.TryOnMode as CoreTryOnMode
 import com.handtryon.coreengine.model.TryOnPlacement as CorePlacement
 import com.handtryon.coreengine.model.TryOnPlacementValidation as CorePlacementValidation
 import com.handtryon.coreengine.model.TryOnSession as CoreSession
+import com.handtryon.coreengine.model.TryOnTrackingState as CoreTrackingState
+import com.handtryon.coreengine.model.TryOnUpdateAction as CoreUpdateAction
 import com.handtryon.coreengine.model.TryOnEngineRenderState
 import com.handtryon.coreengine.model.TryOnEngineResult
 import com.handtryon.coreengine.model.TryOnEngineSessionState
@@ -24,6 +26,8 @@ import com.handtryon.domain.RingPlacement
 import com.handtryon.domain.TryOnInputQuality
 import com.handtryon.domain.TryOnMode
 import com.handtryon.domain.TryOnSession
+import com.handtryon.domain.TryOnTrackingState
+import com.handtryon.domain.TryOnUpdateAction
 import com.handtryon.engine.model.TryOnEngineRequest
 import com.handtryon.render.model.TryOnRenderState
 
@@ -173,6 +177,11 @@ internal class TryOnEngineDomainMapper {
             mode = mode.toDomainMode(),
             anchor = anchor?.toDomainAnchorInternal(),
             placement = placement.toDomainPlacementInternal(),
+            trackingState = trackingState.toDomainTrackingState(),
+            qualityScore = qualityScore,
+            updateAction = updateAction.toDomainUpdateAction(),
+            hints = hints,
+            shouldRenderOverlay = shouldRenderOverlay,
             generatedAtMs = generatedAtMs,
         )
 
@@ -197,6 +206,10 @@ internal class TryOnEngineDomainMapper {
             measurementConfidence = measurementConfidence,
             landmarkConfidence = landmarkConfidence,
             usedLastGoodAnchor = usedLastGoodAnchor,
+            trackingState = trackingState.toCoreTrackingState(),
+            qualityScore = qualityScore,
+            updateAction = updateAction.toCoreUpdateAction(),
+            hints = hints,
         )
 
     private fun CoreInputQuality.toDomainQuality(): TryOnInputQuality =
@@ -206,7 +219,45 @@ internal class TryOnEngineDomainMapper {
             measurementConfidence = measurementConfidence,
             landmarkConfidence = landmarkConfidence,
             usedLastGoodAnchor = usedLastGoodAnchor,
+            trackingState = trackingState.toDomainTrackingState(),
+            qualityScore = qualityScore,
+            updateAction = updateAction.toDomainUpdateAction(),
+            hints = hints,
         )
+
+    private fun TryOnTrackingState.toCoreTrackingState(): CoreTrackingState =
+        when (this) {
+            TryOnTrackingState.Searching -> CoreTrackingState.Searching
+            TryOnTrackingState.Candidate -> CoreTrackingState.Candidate
+            TryOnTrackingState.Locked -> CoreTrackingState.Locked
+            TryOnTrackingState.Recovering -> CoreTrackingState.Recovering
+        }
+
+    private fun CoreTrackingState.toDomainTrackingState(): TryOnTrackingState =
+        when (this) {
+            CoreTrackingState.Searching -> TryOnTrackingState.Searching
+            CoreTrackingState.Candidate -> TryOnTrackingState.Candidate
+            CoreTrackingState.Locked -> TryOnTrackingState.Locked
+            CoreTrackingState.Recovering -> TryOnTrackingState.Recovering
+        }
+
+    private fun TryOnUpdateAction.toCoreUpdateAction(): CoreUpdateAction =
+        when (this) {
+            TryOnUpdateAction.Update -> CoreUpdateAction.Update
+            TryOnUpdateAction.FreezeScaleRotation -> CoreUpdateAction.FreezeScaleRotation
+            TryOnUpdateAction.HoldLastPlacement -> CoreUpdateAction.HoldLastPlacement
+            TryOnUpdateAction.Recover -> CoreUpdateAction.Recover
+            TryOnUpdateAction.Hide -> CoreUpdateAction.Hide
+        }
+
+    private fun CoreUpdateAction.toDomainUpdateAction(): TryOnUpdateAction =
+        when (this) {
+            CoreUpdateAction.Update -> TryOnUpdateAction.Update
+            CoreUpdateAction.FreezeScaleRotation -> TryOnUpdateAction.FreezeScaleRotation
+            CoreUpdateAction.HoldLastPlacement -> TryOnUpdateAction.HoldLastPlacement
+            CoreUpdateAction.Recover -> TryOnUpdateAction.Recover
+            CoreUpdateAction.Hide -> TryOnUpdateAction.Hide
+        }
 
     private fun CorePlacementValidation.toDomainPlacementValidationInternal(): PlacementValidation =
         PlacementValidation(

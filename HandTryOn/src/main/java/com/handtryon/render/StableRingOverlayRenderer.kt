@@ -9,6 +9,8 @@ import com.handtryon.domain.FingerAnchor
 import com.handtryon.domain.RingPlacement
 import com.handtryon.domain.TryOnMode
 import com.handtryon.domain.TryOnRenderResult
+import com.handtryon.domain.TryOnTrackingState
+import com.handtryon.domain.TryOnUpdateAction
 import com.handtryon.render.model.TryOnRenderState
 import com.handtryon.validation.PlacementValidator
 
@@ -46,9 +48,20 @@ class StableRingOverlayRenderer internal constructor(
         frameWidth: Int,
         nowMs: Long = System.currentTimeMillis(),
         alpha: Int = 255,
+        qualityScore: Float = anchor?.confidence ?: 0.62f,
+        trackingState: TryOnTrackingState = if (anchor == null) TryOnTrackingState.Recovering else TryOnTrackingState.Locked,
+        updateAction: TryOnUpdateAction = TryOnUpdateAction.Update,
     ): RingPlacement {
         val deltaMs = if (lastTimestampMs == 0L) 16L else (nowMs - lastTimestampMs).coerceAtLeast(1L)
-        val stablePlacement = smoother.smooth(raw = rawPlacement, previous = lastPlacement, deltaMs = deltaMs)
+        val stablePlacement =
+            smoother.smooth(
+                raw = rawPlacement,
+                previous = lastPlacement,
+                deltaMs = deltaMs,
+                qualityScore = qualityScore,
+                trackingState = trackingState,
+                updateAction = updateAction,
+            )
         val validation = validator.validate(stablePlacement, anchor, lastPlacement, frameWidth)
         val safePlacement =
             if (validation.isPlacementUsable) {
@@ -71,9 +84,23 @@ class StableRingOverlayRenderer internal constructor(
         anchor: FingerAnchor?,
         mode: TryOnMode,
         nowMs: Long = System.currentTimeMillis(),
+        qualityScore: Float = anchor?.confidence ?: 0.62f,
+        trackingState: TryOnTrackingState = if (anchor == null) TryOnTrackingState.Recovering else TryOnTrackingState.Locked,
+        updateAction: TryOnUpdateAction = TryOnUpdateAction.Update,
+        shouldRenderOverlay: Boolean = true,
     ): TryOnRenderResult {
         val output = baseFrame.copy(Bitmap.Config.ARGB_8888, true)
         val canvas = Canvas(output)
+        if (!shouldRenderOverlay) {
+            val validation = validator.validate(rawPlacement, anchor, lastPlacement, baseFrame.width)
+            lastTimestampMs = nowMs
+            return TryOnRenderResult(
+                bitmap = output,
+                mode = mode,
+                generatedAtMs = nowMs,
+                validation = validation.copy(notes = (validation.notes + "suppressed_by_quality_gate").distinct()),
+            )
+        }
         val previousPlacement = lastPlacement
         val stablePlacement =
             drawOverlay(
@@ -84,6 +111,9 @@ class StableRingOverlayRenderer internal constructor(
                 frameWidth = baseFrame.width,
                 nowMs = nowMs,
                 alpha = 255,
+                qualityScore = qualityScore,
+                trackingState = trackingState,
+                updateAction = updateAction,
             )
         val validation = validator.validate(stablePlacement, anchor, previousPlacement, baseFrame.width)
         return TryOnRenderResult(
@@ -107,6 +137,10 @@ class StableRingOverlayRenderer internal constructor(
             anchor = renderState.anchor,
             mode = renderState.mode,
             nowMs = nowMs,
+            qualityScore = renderState.qualityScore,
+            trackingState = renderState.trackingState,
+            updateAction = renderState.updateAction,
+            shouldRenderOverlay = renderState.shouldRenderOverlay,
         )
 
     private fun drawRing(

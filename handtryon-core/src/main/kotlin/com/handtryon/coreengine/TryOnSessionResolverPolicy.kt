@@ -8,12 +8,19 @@ import com.handtryon.coreengine.model.TryOnMeasurementSnapshot
 import com.handtryon.coreengine.model.TryOnMode
 import com.handtryon.coreengine.model.TryOnPlacement
 import com.handtryon.coreengine.model.TryOnSession
+import com.handtryon.coreengine.model.TryOnUpdateAction
 import kotlin.math.abs
+import kotlin.math.sqrt
 
 class TryOnSessionResolverPolicy(
     private val fingerAnchorFactory: FingerAnchorFactory = DefaultFingerAnchorFactory(),
+    private val trackingPolicy: TryOnTrackingStateMachinePolicy = TryOnTrackingStateMachinePolicy(),
+    private val qualityPolicy: TryOnQualityPolicy = TryOnQualityPolicy(),
+    private val smootherPolicy: TemporalPlacementSmootherPolicy = TemporalPlacementSmootherPolicy(),
+    private val placementValidationPolicy: PlacementValidationPolicy = PlacementValidationPolicy(),
 ) {
     private var lastGoodAnchor: TryOnFingerAnchor? = null
+    private var trackingSnapshot = TryOnTrackingSnapshot()
 
     fun resolve(
         asset: TryOnAssetSource,
@@ -34,7 +41,6 @@ class TryOnSessionResolverPolicy(
                 null
             }
         val anchor = detectedAnchor ?: fallbackAnchor
-        if (detectedAnchor != null) lastGoodAnchor = detectedAnchor
 
         val landmarkUsable = anchor != null
         val measurementUsable = measurement.isUsableMeasurement()
@@ -44,14 +50,6 @@ class TryOnSessionResolverPolicy(
                 landmarkUsable -> TryOnMode.LandmarkOnly
                 else -> TryOnMode.Manual
             }
-        val quality =
-            TryOnInputQuality(
-                measurementUsable = measurementUsable,
-                landmarkUsable = landmarkUsable,
-                measurementConfidence = measurement?.confidence ?: 0f,
-                landmarkConfidence = anchor?.confidence ?: 0f,
-                usedLastGoodAnchor = detectedAnchor == null && fallbackAnchor != null,
-            )
 
         val resolvedPlacement =
             when (mode) {
@@ -63,12 +61,94 @@ class TryOnSessionResolverPolicy(
                         ?: defaultPlacement(asset, frameWidth = frameWidth, frameHeight = frameHeight)
             }
         val biasedPlacement = resolvedPlacement.copy(rotationDegrees = resolvedPlacement.rotationDegrees + asset.rotationBiasDeg)
-        val stabilizedPlacement = clampPlacementJumps(biasedPlacement, previousSession?.placement)
+        val previousPlacement = previousSession?.placement
+        val candidatePlacement = clampPlacementJumps(biasedPlacement, previousPlacement)
+        val validation =
+            placementValidationPolicy.validate(
+                placement = candidatePlacement,
+                anchor = anchor,
+                previousPlacement = previousPlacement,
+                frameWidth = frameWidth,
+            )
+        val anchorJumpPx = computeAnchorJumpPx(anchor, previousSession?.anchor)
+        val placementJumpRatio = computePlacementJumpRatio(candidatePlacement, previousPlacement)
+        val fallbackUsed = detectedAnchor == null && fallbackAnchor != null
+
+        val qualitySignals =
+            TryOnQualitySignals(
+                mode = mode,
+                landmarkUsable = landmarkUsable,
+                measurementUsable = measurementUsable,
+                landmarkConfidence = anchor?.confidence ?: 0f,
+                measurementConfidence = measurement?.confidence ?: 0f,
+                usedLastGoodAnchor = fallbackUsed,
+                anchorJumpPx = anchorJumpPx,
+                placementJumpRatio = placementJumpRatio,
+                validation = validation,
+                trackingState = trackingSnapshot.state,
+                hasPreviousPlacement = previousPlacement != null,
+            )
+        val preliminaryScore = qualityPolicy.score(qualitySignals)
+        trackingSnapshot =
+            trackingPolicy.transition(
+                previous = trackingSnapshot,
+                input =
+                    TryOnTrackingInput(
+                        landmarkUsable = landmarkUsable,
+                        qualityScore = preliminaryScore,
+                        validationUsable = validation.isPlacementUsable,
+                        usingFallbackAnchor = fallbackUsed,
+                    ),
+            )
+        val qualityEvaluation = qualityPolicy.evaluate(qualitySignals.copy(trackingState = trackingSnapshot.state))
+
+        val gatedPlacement =
+            if (mode == TryOnMode.Manual) {
+                candidatePlacement
+            } else {
+                applyQualityGate(
+                    candidate = candidatePlacement,
+                    previous = previousPlacement,
+                    action = qualityEvaluation.updateAction,
+                )
+            }
+        val deltaMs = if (previousSession == null) 16L else (nowMs - previousSession.updatedAtMs).coerceAtLeast(1L)
+        val stabilizedPlacement =
+            if (mode == TryOnMode.Manual) {
+                gatedPlacement
+            } else {
+                smootherPolicy.smooth(
+                    raw = gatedPlacement,
+                    previous = previousPlacement,
+                    deltaMs = deltaMs,
+                    context =
+                        TryOnSmoothingContext(
+                            qualityScore = qualityEvaluation.score,
+                            trackingState = trackingSnapshot.state,
+                            updateAction = qualityEvaluation.updateAction,
+                        ),
+                )
+            }
+
+        if (detectedAnchor != null && preliminaryScore >= 0.34f) {
+            lastGoodAnchor = detectedAnchor
+        }
 
         return TryOnSession(
             asset = asset,
             mode = mode,
-            quality = quality,
+            quality =
+                TryOnInputQuality(
+                    measurementUsable = measurementUsable,
+                    landmarkUsable = landmarkUsable,
+                    measurementConfidence = measurement?.confidence ?: 0f,
+                    landmarkConfidence = anchor?.confidence ?: 0f,
+                    usedLastGoodAnchor = fallbackUsed,
+                    trackingState = trackingSnapshot.state,
+                    qualityScore = qualityEvaluation.score,
+                    updateAction = qualityEvaluation.updateAction,
+                    hints = qualityEvaluation.hints,
+                ),
             anchor = anchor,
             placement = stabilizedPlacement,
             updatedAtMs = nowMs,
@@ -146,6 +226,52 @@ class TryOnSessionResolverPolicy(
         base: Float,
         maxDelta: Float,
     ): Float = base + (value - base).coerceIn(-abs(maxDelta), abs(maxDelta))
+
+    private fun computeAnchorJumpPx(
+        current: TryOnFingerAnchor?,
+        previous: TryOnFingerAnchor?,
+    ): Float {
+        if (current == null || previous == null) return 0f
+        val dx = current.centerX - previous.centerX
+        val dy = current.centerY - previous.centerY
+        return sqrt(dx * dx + dy * dy)
+    }
+
+    private fun computePlacementJumpRatio(
+        current: TryOnPlacement,
+        previous: TryOnPlacement?,
+    ): Float {
+        if (previous == null) return 0f
+        val dx = current.centerX - previous.centerX
+        val dy = current.centerY - previous.centerY
+        val jumpPx = sqrt(dx * dx + dy * dy)
+        return (jumpPx / previous.ringWidthPx.coerceAtLeast(1f)).coerceIn(0f, 2f)
+    }
+
+    private fun applyQualityGate(
+        candidate: TryOnPlacement,
+        previous: TryOnPlacement?,
+        action: TryOnUpdateAction,
+    ): TryOnPlacement {
+        val old = previous ?: return candidate
+        return when (action) {
+            TryOnUpdateAction.Update -> candidate
+            TryOnUpdateAction.FreezeScaleRotation ->
+                candidate.copy(
+                    ringWidthPx = old.ringWidthPx,
+                    rotationDegrees = old.rotationDegrees,
+                )
+            TryOnUpdateAction.HoldLastPlacement -> old
+            TryOnUpdateAction.Recover ->
+                TryOnPlacement(
+                    centerX = old.centerX + (candidate.centerX - old.centerX) * 0.75f,
+                    centerY = old.centerY + (candidate.centerY - old.centerY) * 0.75f,
+                    ringWidthPx = old.ringWidthPx + (candidate.ringWidthPx - old.ringWidthPx) * 0.42f,
+                    rotationDegrees = old.rotationDegrees + normalizeRotationDelta(candidate.rotationDegrees - old.rotationDegrees) * 0.45f,
+                )
+            TryOnUpdateAction.Hide -> old
+        }
+    }
 
     private fun normalizeRotationDelta(delta: Float): Float {
         var adjusted = delta

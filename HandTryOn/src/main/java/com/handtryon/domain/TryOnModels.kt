@@ -57,12 +57,31 @@ data class MeasurementSnapshot(
     val usable: Boolean = true,
 )
 
+enum class TryOnTrackingState {
+    Searching,
+    Candidate,
+    Locked,
+    Recovering,
+}
+
+enum class TryOnUpdateAction {
+    Update,
+    FreezeScaleRotation,
+    HoldLastPlacement,
+    Recover,
+    Hide,
+}
+
 data class TryOnInputQuality(
     val measurementUsable: Boolean,
     val landmarkUsable: Boolean,
     val measurementConfidence: Float,
     val landmarkConfidence: Float,
     val usedLastGoodAnchor: Boolean,
+    val trackingState: TryOnTrackingState = TryOnTrackingState.Searching,
+    val qualityScore: Float = 0f,
+    val updateAction: TryOnUpdateAction = TryOnUpdateAction.Update,
+    val hints: List<String> = emptyList(),
 )
 
 data class FingerAnchor(

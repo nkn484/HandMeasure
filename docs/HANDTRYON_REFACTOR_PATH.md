@@ -14,6 +14,8 @@
 - Added new module `:handtryon-core`.
 - Extracted Android-free models and policy logic:
   - `TryOnSessionResolverPolicy`
+  - `TryOnTrackingStateMachinePolicy`
+  - `TryOnQualityPolicy`
   - `TemporalPlacementSmootherPolicy`
   - `PlacementValidationPolicy`
   - `DefaultFingerAnchorFactory`
@@ -51,6 +53,7 @@
   - compatibility wrappers for existing API usage
 - **Portable core (`:handtryon-core`)**
   - session/mode/fallback policy
+  - tracking state machine + quality scoring/gating
   - smoothing/validation policy
   - anchor extraction policy
   - engine-facing result/session/render contracts and shaping helper
@@ -75,9 +78,28 @@
 - Baseline contract tests are in place for:
   - `TryOnEngine` orchestration boundary
   - `TryOnSessionResolverPolicy`
+  - `TryOnTrackingStateMachinePolicy`
+  - `TryOnQualityPolicy`
   - `TemporalPlacementSmootherPolicy`
   - `PlacementValidationPolicy`
   - mapper conversions between engine-facing/core models and Android compatibility models
+
+## Runtime stability status (current phase)
+
+- `TryOnSessionResolverPolicy` now executes runtime stability control in this order:
+  - mode/fallback resolution (`Measured` / `LandmarkOnly` / `Manual`)
+  - placement validation and jump signals
+  - tracking state transition (`Searching`, `Candidate`, `Locked`, `Recovering`)
+  - quality score + gating action
+  - adaptive smoothing with state-aware context
+- Quality gate actions now directly affect placement update behavior:
+  - `Update`
+  - `FreezeScaleRotation`
+  - `HoldLastPlacement`
+  - `Recover`
+  - `Hide`
+- `TryOnEngineRenderState` and compatibility `TryOnRenderState` now carry tracking/quality/update metadata (`trackingState`, `qualityScore`, `updateAction`, `hints`, `shouldRenderOverlay`) while keeping `Bitmap` output Android-side.
+- `StableRingOverlayRenderer` remains Android-only and consumes compatibility render-state metadata without moving renderer concerns into `:handtryon-core`.
 
 ## What is still future work after Phase 1
 
