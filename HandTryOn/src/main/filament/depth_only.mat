@@ -1,0 +1,17 @@
+﻿material {
+    name : DepthOnly,
+    shadingModel : unlit,
+    blending : transparent,
+    depthWrite : true,
+    depthCulling : true,
+    colorWrite : false,
+    doubleSided : true,
+    variantFilter : [ directionalLighting, dynamicLighting, shadowReceiver, skinning, vsm, fog, ssr, stereo ]
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        material.baseColor = vec4(0.0);
+    }
+}

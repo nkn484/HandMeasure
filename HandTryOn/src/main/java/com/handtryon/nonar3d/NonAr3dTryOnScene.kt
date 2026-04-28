@@ -1,4 +1,5 @@
 package com.handtryon.nonar3d
+import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -7,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import com.handtryon.domain.GlbAssetSummary
 import com.handtryon.domain.HandPoseSnapshot
 import com.handtryon.domain.MeasurementSnapshot
@@ -42,6 +44,7 @@ fun NonAr3dTryOnScene(
     onRendererError: (Throwable) -> Unit = {},
 ) {
     val engine = rememberEngine()
+    val context = LocalContext.current
     val modelLoader = rememberModelLoader(engine)
     val materialLoader = rememberMaterialLoader(engine)
     val childNodes = rememberNodes()
@@ -79,7 +82,7 @@ fun NonAr3dTryOnScene(
 
         val node =
             runCatching {
-                createRingNode(modelLoader = modelLoader, modelAssetPath = modelAssetPath)
+                createRingNode(context = context, modelLoader = modelLoader, modelAssetPath = modelAssetPath)
             }.onFailure(onRendererError).getOrNull()
 
         if (node != null) {
@@ -191,13 +194,17 @@ fun NonAr3dTryOnScene(
     )
 }
 
-private suspend fun createRingNode(
+private fun createRingNode(
+    context: Context,
     modelLoader: ModelLoader,
     modelAssetPath: String,
 ): ModelNode {
+    val assetBytes = readAssetLength(context = context, assetPath = modelAssetPath)
     val modelInstance =
-        modelLoader.loadModelInstance(modelAssetPath)
-            ?: error("ModelLoader returned null for $modelAssetPath")
+        runCatching { modelLoader.createModelInstance(modelAssetPath) }
+            .getOrElse { throwable ->
+                throw IllegalStateException("Filament could not parse GLB asset $modelAssetPath ($assetBytes bytes)", throwable)
+            }
 
     return ModelNode(
         modelInstance = modelInstance,
@@ -210,6 +217,18 @@ private suspend fun createRingNode(
         isVisible = false
     }
 }
+
+private fun readAssetLength(
+    context: Context,
+    assetPath: String,
+): Int =
+    runCatching {
+        context.assets.open(assetPath).use { input ->
+            input.available().takeIf { it > 0 } ?: input.readBytes().size
+        }
+    }.getOrElse { throwable ->
+        throw IllegalStateException("Asset is not readable: $assetPath", throwable)
+    }
 
 private data class NonAr3dRingTransform(
     val xMeters: Float,

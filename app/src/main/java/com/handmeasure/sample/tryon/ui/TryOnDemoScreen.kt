@@ -167,7 +167,18 @@ fun TryOnDemoScreen(
     fun applyMeasurementHandoff(handoff: TryOnDemoHandoff) {
         latestMeasurementHandoff = handoff
         measurementProvider.snapshot = handoff.snapshot
-        session = resolveSessionState()
+        val resolved = resolveSessionState(measurement = handoff.snapshot)
+        manualPlacement = resolved.placement
+        manualAdjustEnabled = true
+        session =
+            resolved.copy(
+                mode = TryOnMode.Manual,
+                quality =
+                    resolved.quality.copy(
+                        qualityScore = maxOf(resolved.quality.qualityScore, 0.72f),
+                        updateAction = TryOnUpdateAction.Update,
+                    ),
+            )
     }
 
     fun clearMeasurementHandoff() {
@@ -189,14 +200,6 @@ fun TryOnDemoScreen(
                 arPreviewEnabled = false
                 hasSelectedPreviewMode = false
             }
-        }
-    }
-
-    LaunchedEffect(isArPreviewActive) {
-        if (isArPreviewActive && manualAdjustEnabled) {
-            manualAdjustEnabled = false
-            manualPlacement = null
-            session = resolveSessionState(manualPlacementOverride = null)
         }
     }
 
@@ -350,6 +353,8 @@ fun TryOnDemoScreen(
                 qualityScore = currentSession?.quality?.qualityScore ?: 0.62f,
                 trackingState = currentSession?.quality?.trackingState ?: TryOnTrackingState.Searching,
                 updateAction = currentSession?.quality?.updateAction ?: TryOnUpdateAction.Update,
+                handPose = latestHandPose,
+                measurement = measurementProvider.latestMeasurement(),
                 onRendererError = { throwable ->
                     rendererError = "ARCore 3D: ${throwable.message ?: throwable::class.java.simpleName}"
                 },
