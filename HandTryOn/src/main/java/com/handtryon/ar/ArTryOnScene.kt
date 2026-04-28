@@ -24,6 +24,7 @@ import com.handtryon.nonar3d.FingerOccluderMeshFactory
 import com.handtryon.nonar3d.FingerOccluderNodeFactory
 import com.handtryon.nonar3d.RingFingerPose3D
 import com.handtryon.nonar3d.RingFingerPoseSolver
+import com.handtryon.render3d.TryOnRenderState3DFactory
 import dev.romainguy.kotlin.math.Float3
 import io.github.sceneview.ar.ARScene
 import io.github.sceneview.ar.rememberARCameraStream
@@ -60,6 +61,7 @@ fun ArTryOnScene(
     val placementMapper = remember { ArRingPlacementMapper() }
     val frameSampler = remember { ArCoreCameraFrameSampler() }
     val fingerPoseSolver = remember { RingFingerPoseSolver() }
+    val renderStateFactory = remember { TryOnRenderState3DFactory() }
     val occluderMeshFactory = remember { FingerOccluderMeshFactory() }
     val depthOnlyMaterialFactory = remember { DepthOnlyMaterialFactory() }
     val occluderNodeFactory = remember { FingerOccluderNodeFactory() }
@@ -68,6 +70,7 @@ fun ArTryOnScene(
     var lastRenderablePlacement by remember { mutableStateOf<RingPlacement?>(null) }
     var ringFingerPose by remember { mutableStateOf<RingFingerPose3D?>(null) }
     var fingerOccluderMesh by remember { mutableStateOf<FingerOccluderMesh?>(null) }
+    var renderState3D by remember { mutableStateOf<com.handtryon.coreengine.model.TryOnRenderState3D?>(null) }
 
     LaunchedEffect(cameraStream) {
         cameraStream.isDepthOcclusionEnabled = true
@@ -106,11 +109,25 @@ fun ArTryOnScene(
         ringFingerPose = fingerPoseSolver.solve(handPose = handPose, measurement = measurement, glbSummary = glbSummary)
     }
 
-    LaunchedEffect(ringFingerPose, frameWidth, frameHeight) {
+    LaunchedEffect(handPose, measurement, glbSummary, frameWidth, frameHeight, qualityScore, trackingState, updateAction) {
+        renderState3D =
+            renderStateFactory.create(
+                handPose = handPose,
+                measurement = measurement,
+                glbSummary = glbSummary,
+                frameWidth = frameWidth,
+                frameHeight = frameHeight,
+                qualityScore = qualityScore,
+                trackingState = trackingState,
+                updateAction = updateAction,
+            )
+    }
+
+    LaunchedEffect(renderState3D, frameWidth, frameHeight) {
         fingerOccluderMesh =
-            ringFingerPose?.let { pose ->
+            renderState3D?.fingerOccluder?.let { occluder ->
                 occluderMeshFactory.create(
-                    pose = pose,
+                    state = occluder,
                     frameWidth = frameWidth,
                     frameHeight = frameHeight,
                 )
@@ -162,6 +179,7 @@ fun ArTryOnScene(
         glbSummary,
         ringFingerPose,
         fingerOccluderMesh,
+        renderState3D,
     ) {
         val node = ringNode ?: return@LaunchedEffect
         val currentPlacement = placement
@@ -181,7 +199,14 @@ fun ArTryOnScene(
 
         node.isVisible = renderPlacement != null
 
-        if (renderPlacement != null) {
+        val renderState = renderState3D
+        if (renderState != null) {
+            val transform = renderState.ringTransform
+            node.position = Float3(transform.positionMeters.x, transform.positionMeters.y, transform.positionMeters.z)
+            node.rotation = Float3(transform.rotationDegrees.x, transform.rotationDegrees.y, transform.rotationDegrees.z)
+            node.scale = Float3(transform.scale.x, transform.scale.y, transform.scale.z)
+            node.setPriority(RING_PRIORITY)
+        } else if (renderPlacement != null) {
             val transform =
                 placementMapper.map(
                     placement = renderPlacement,

@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "source": "manual_annotations_from_chat_screenshots",
+  "frameWidth": 921,
+  "frameHeight": 2048,
+  "frames": [
+    {
+      "file": "screenshot_0047_hand_visible.jpg",
+      "ringFingerZone": {
+        "centerX": 398,
+        "centerY": 735,
+        "widthPx": 76,
+        "rotationDeg": 88
+      },
+      "visibleFinger": true,
+      "notes": ["arcore_3d", "landmark_mode", "ring_rendered_left_of_hand"]
+    },
+    {
+      "file": "screenshot_0046_hand_missing.jpg",
+      "ringFingerZone": {
+        "centerX": 0,
+        "centerY": 0,
+        "widthPx": 0,
+        "rotationDeg": 0
+      },
+      "visibleFinger": false,
+      "notes": ["manual_mode", "no_visible_hand", "ring_should_hide_or_hold_not_reanchor_to_background"]
+    }
+  ]
+}

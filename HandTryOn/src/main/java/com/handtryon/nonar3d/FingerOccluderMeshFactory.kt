@@ -1,5 +1,6 @@
 package com.handtryon.nonar3d
 
+import com.handtryon.coreengine.model.FingerOccluderState
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -38,15 +39,43 @@ class FingerOccluderMeshFactory(
         pose: RingFingerPose3D,
         frameWidth: Int,
         frameHeight: Int,
+    ): FingerOccluderMesh =
+        create(
+            startPx = pose.occluderStartPx,
+            endPx = pose.occluderEndPx,
+            radiusPx = pose.fingerWidthPx * 0.5f,
+            frameWidth = frameWidth,
+            frameHeight = frameHeight,
+        )
+
+    fun create(
+        state: FingerOccluderState,
+        frameWidth: Int,
+        frameHeight: Int,
+    ): FingerOccluderMesh =
+        create(
+            startPx = NonAr3dPoint2(state.startPx.x, state.startPx.y),
+            endPx = NonAr3dPoint2(state.endPx.x, state.endPx.y),
+            radiusPx = state.radiusPx,
+            frameWidth = frameWidth,
+            frameHeight = frameHeight,
+        )
+
+    private fun create(
+        startPx: NonAr3dPoint2,
+        endPx: NonAr3dPoint2,
+        radiusPx: Float,
+        frameWidth: Int,
+        frameHeight: Int,
     ): FingerOccluderMesh {
         val safeWidth = frameWidth.coerceAtLeast(1).toFloat()
         val safeHeight = frameHeight.coerceAtLeast(1).toFloat()
-        val start = project(pose.occluderStartPx, safeWidth, safeHeight)
-        val end = project(pose.occluderEndPx, safeWidth, safeHeight)
+        val start = project(startPx, safeWidth, safeHeight)
+        val end = project(endPx, safeWidth, safeHeight)
         val axis = NonAr3dVec3(end.x - start.x, end.y - start.y, end.z - start.z)
         val length = sqrt(axis.x * axis.x + axis.y * axis.y + axis.z * axis.z).coerceAtLeast(1e-4f)
         val tangent = axis.normalized()
-        val radius = ((pose.fingerWidthPx / safeWidth) * viewportWidthAtDepthMeters * 0.5f * radiusScale).coerceAtLeast(0.0025f)
+        val radius = ((radiusPx / safeWidth) * viewportWidthAtDepthMeters * radiusScale).coerceAtLeast(0.0025f)
         val normalA = NonAr3dVec3(-tangent.y, tangent.x, 0f).normalized()
         val normalB =
             NonAr3dVec3(
