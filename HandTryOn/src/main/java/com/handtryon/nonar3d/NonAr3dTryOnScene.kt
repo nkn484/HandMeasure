@@ -1,6 +1,4 @@
 package com.handtryon.nonar3d
-
-import android.graphics.PixelFormat
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -39,6 +37,7 @@ fun NonAr3dTryOnScene(
     updateAction: TryOnUpdateAction,
     handPose: HandPoseSnapshot? = null,
     measurement: MeasurementSnapshot? = null,
+    enableFingerOccluder: Boolean = false,
     modifier: Modifier = Modifier,
     onRendererError: (Throwable) -> Unit = {},
 ) {
@@ -89,7 +88,14 @@ fun NonAr3dTryOnScene(
         }
     }
 
-    LaunchedEffect(handPose, measurement, glbSummary, frameWidth, frameHeight) {
+    LaunchedEffect(enableFingerOccluder, handPose, measurement, glbSummary, frameWidth, frameHeight) {
+        if (!enableFingerOccluder) {
+            ringFingerPose = null
+            fingerOccluderMesh = null
+            occluderNode?.isVisible = false
+            return@LaunchedEffect
+        }
+
         val pose = fingerPoseSolver.solve(handPose = handPose, measurement = measurement, glbSummary = glbSummary)
         ringFingerPose = pose
         fingerOccluderMesh =
@@ -102,7 +108,12 @@ fun NonAr3dTryOnScene(
             }
     }
 
-    LaunchedEffect(materialLoader, fingerOccluderMesh) {
+    LaunchedEffect(enableFingerOccluder, materialLoader, fingerOccluderMesh) {
+        if (!enableFingerOccluder) {
+            occluderNode?.isVisible = false
+            return@LaunchedEffect
+        }
+
         val mesh = fingerOccluderMesh
         if (mesh == null) {
             occluderNode?.isVisible = false
@@ -177,19 +188,19 @@ fun NonAr3dTryOnScene(
         cameraNode = cameraNode,
         cameraManipulator = null,
         childNodes = childNodes,
-        onViewCreated = {
-            holder.setFormat(PixelFormat.TRANSLUCENT)
-            setZOrderMediaOverlay(true)
-        },
     )
 }
 
-private fun createRingNode(
+private suspend fun createRingNode(
     modelLoader: ModelLoader,
     modelAssetPath: String,
-): ModelNode =
-    ModelNode(
-        modelInstance = modelLoader.createModelInstance(modelAssetPath),
+): ModelNode {
+    val modelInstance =
+        modelLoader.loadModelInstance(modelAssetPath)
+            ?: error("ModelLoader returned null for $modelAssetPath")
+
+    return ModelNode(
+        modelInstance = modelInstance,
         autoAnimate = false,
         scaleToUnits = null,
         centerOrigin = Float3(0f, 0f, 0f),
@@ -198,6 +209,7 @@ private fun createRingNode(
         isTouchable = false
         isVisible = false
     }
+}
 
 private data class NonAr3dRingTransform(
     val xMeters: Float,

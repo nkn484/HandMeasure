@@ -69,8 +69,23 @@ goto fail
 
 :execute
 @rem Setup the command line
+@rem Work around cmd.exe + Unicode path issues by executing wrapper jar from an ASCII temp location.
+set WRAPPER_JAR=%APP_HOME%\gradle\wrapper\gradle-wrapper.jar
+set WRAPPER_PROPERTIES=%APP_HOME%\gradle\wrapper\gradle-wrapper.properties
+set WRAPPER_TEMP_DIR=%SystemRoot%\Temp\gradle-wrapper-%APP_BASE_NAME%
 
-set CLASSPATH=%APP_HOME%\gradle\wrapper\gradle-wrapper.jar
+if exist "%WRAPPER_JAR%" (
+    if not exist "%WRAPPER_TEMP_DIR%" mkdir "%WRAPPER_TEMP_DIR%" >NUL 2>&1
+    copy /Y "%WRAPPER_JAR%" "%WRAPPER_TEMP_DIR%\gradle-wrapper.jar" >NUL 2>&1
+    copy /Y "%WRAPPER_PROPERTIES%" "%WRAPPER_TEMP_DIR%\gradle-wrapper.properties" >NUL 2>&1
+    if exist "%WRAPPER_TEMP_DIR%\gradle-wrapper.jar" (
+        set CLASSPATH=%WRAPPER_TEMP_DIR%\gradle-wrapper.jar
+    ) else (
+        set CLASSPATH=%WRAPPER_JAR%
+    )
+) else (
+    set CLASSPATH=%WRAPPER_JAR%
+)
 
 
 @rem Execute Gradle

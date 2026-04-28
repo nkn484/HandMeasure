@@ -2,6 +2,13 @@
 
 `HandTryOn` provides real-time ring overlay for Android preview and export flows.
 
+## Asset format support
+
+- 2D overlay PNG remains the active render path in the current module.
+- `.glb` ring assets are now supported at the asset-contract level (`modelAssetPath`) and can be introspected through `RingAssetLoader.loadGlbSummary(...)`.
+- For now, a GLB asset should be paired with a PNG fallback (`overlayAssetPath`) for preview/export until a 3D renderer is introduced.
+- AR renderer replacement is tracked in `docs/HANDTRYON_AR_RENDERER_UPGRADE.md`.
+
 ## Goals
 
 - Keep try-on independent from `HandMeasureContract`.

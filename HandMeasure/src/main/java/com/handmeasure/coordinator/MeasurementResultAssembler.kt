@@ -5,10 +5,13 @@ import com.handmeasure.api.DebugMetadata
 import com.handmeasure.api.FusedDiagnostics
 import com.handmeasure.api.HandMeasureConfig
 import com.handmeasure.api.HandMeasureResult
+import com.handmeasure.api.HandMeasureWarning
 import com.handmeasure.api.SessionDiagnostics
 import com.handmeasure.flow.CaptureUiState
 import com.handmeasure.flow.StepCandidate
+import com.handmeasure.measurement.EllipseMath
 import com.handmeasure.measurement.FingerMeasurementFusion
+import com.handmeasure.measurement.FusedFingerMeasurement
 import com.handmeasure.measurement.ResultReliabilityPolicy
 import com.handmeasure.measurement.TableRingSizeMapper
 
@@ -28,7 +31,7 @@ internal class MeasurementResultAssembler(
         processing: SessionProcessingOutput,
     ): HandMeasureResult {
         val warnings = processing.warnings.toMutableSet()
-        val fused = fingerMeasurementFusion.fuse(processing.stepMeasurements)
+        val fused = applySanityGuard(fingerMeasurementFusion.fuse(processing.stepMeasurements))
         warnings += fused.warnings
 
         val reliability =
@@ -97,4 +100,60 @@ internal class MeasurementResultAssembler(
                 ),
         )
     }
+
+    private fun applySanityGuard(fused: FusedFingerMeasurement): FusedFingerMeasurement {
+        val limits = config.sanityLimits
+        if (!limits.enabled) return fused
+        if (!isOutsideSanityRange(fused, limits)) return fused
+
+        val isExtremeOutlier =
+            fused.widthMm > limits.maxWidthMm * limits.extremeMultiplier ||
+                fused.thicknessMm > limits.maxThicknessMm * limits.extremeMultiplier ||
+                fused.circumferenceMm > limits.maxCircumferenceMm * limits.extremeMultiplier ||
+                fused.equivalentDiameterMm > limits.maxEquivalentDiameterMm * limits.extremeMultiplier
+
+        val guardedWidth =
+            if (isExtremeOutlier) {
+                limits.fallbackWidthMm
+            } else {
+                fused.widthMm.coerceIn(limits.minWidthMm, limits.maxWidthMm)
+            }
+        val guardedThickness =
+            if (isExtremeOutlier) {
+                limits.fallbackThicknessMm
+            } else {
+                fused.thicknessMm.coerceIn(limits.minThicknessMm, limits.maxThicknessMm)
+            }
+        val guardedCircumference =
+            EllipseMath
+                .circumferenceFromWidthThickness(guardedWidth, guardedThickness)
+                .coerceIn(limits.minCircumferenceMm, limits.maxCircumferenceMm)
+        val guardedDiameter =
+            EllipseMath
+                .equivalentDiameterFromCircumference(guardedCircumference)
+                .coerceIn(limits.minEquivalentDiameterMm, limits.maxEquivalentDiameterMm)
+
+        return fused.copy(
+            widthMm = guardedWidth,
+            thicknessMm = guardedThickness,
+            circumferenceMm = guardedCircumference,
+            equivalentDiameterMm = guardedDiameter,
+            confidenceScore = fused.confidenceScore.coerceAtMost(limits.maxConfidenceWhenAdjusted),
+            warnings = (fused.warnings + HandMeasureWarning.BEST_EFFORT_ESTIMATE + HandMeasureWarning.LOW_RESULT_RELIABILITY).distinct(),
+            debugNotes =
+                fused.debugNotes +
+                    "sanity_guard_applied=true" +
+                    "|rawCircumferenceMm=${"%.2f".format(fused.circumferenceMm)}" +
+                    "|guardedCircumferenceMm=${"%.2f".format(guardedCircumference)}",
+        )
+    }
+
+    private fun isOutsideSanityRange(
+        fused: FusedFingerMeasurement,
+        limits: com.handmeasure.api.MeasurementSanityLimits,
+    ): Boolean =
+        fused.widthMm !in limits.minWidthMm..limits.maxWidthMm ||
+            fused.thicknessMm !in limits.minThicknessMm..limits.maxThicknessMm ||
+            fused.circumferenceMm !in limits.minCircumferenceMm..limits.maxCircumferenceMm ||
+            fused.equivalentDiameterMm !in limits.minEquivalentDiameterMm..limits.maxEquivalentDiameterMm
 }

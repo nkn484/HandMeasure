@@ -31,7 +31,11 @@ data class ThicknessEstimationPolicy(
             tiltCorrection = tiltCorrection,
             frontalFallbackThicknessRatio = frontalFallbackThicknessRatio,
             minThicknessCandidatesForStableEstimate = minThicknessCandidatesForStableEstimate,
-        ).thicknessCorrection(step.toCore())
+        ).thicknessCorrection(
+            step = step.toCore(),
+            source = CoreWidthMeasurementSource.EDGE_PROFILE,
+            measurementConfidence = 1f,
+        )
 }
 
 private fun StepMeasurement.toCore(): CoreStepMeasurement =

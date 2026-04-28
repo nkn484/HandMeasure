@@ -346,6 +346,13 @@ New unit tests in `:handmeasure-core`:
 - `TryOnRenderResult` remains Android-side by design because it contains `Bitmap`.
 - Existing mode/fallback/smoothing/validation semantics are preserved via delegation adapters.
 
+## Phase 11.1 prep: HandTryOn AR renderer replacement path
+
+- Added `docs/HANDTRYON_AR_RENDERER_UPGRADE.md` as the source plan for replacing the current PNG/Canvas preview with an inline AR renderer.
+- Recommended path is an Android-side `com.handtryon.ar` package using ARCore + Filament/SceneView while keeping `:handtryon-core` Android-free.
+- `ring_AR.glb` has been validated as a real-scale glTF 2.0 asset suitable for ring-size-driven placement.
+- Current 2D renderer remains the runtime path until AR session lifecycle, GLB model transform, hand landmark frame input, and export capture are proven on device.
+
 ## Phase 12 update: HandMeasure capture-flow stability protocol
 
 ### Capture protocol behavior shift

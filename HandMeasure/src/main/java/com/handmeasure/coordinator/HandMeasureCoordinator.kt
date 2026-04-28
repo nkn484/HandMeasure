@@ -93,6 +93,7 @@ class HandMeasureCoordinator(
 
     private val frameSignalEstimator = FrameSignalEstimator()
     private val poseGuidanceHintDecider = PoseGuidanceHintDecider()
+    private val cardDetectionMemory = CardDetectionMemory()
     private val measurementEngine =
         AndroidMeasurementEngineFactory.create(
             config = engineApiMapper.toEngineConfig(config),
@@ -112,8 +113,10 @@ class HandMeasureCoordinator(
 
     fun analyzeFrame(jpegBytes: ByteArray, bitmap: Bitmap): LiveAnalysisState {
         val fallbackStep = stateMachine.currentStep().step
+        val frameTimestampMs = System.currentTimeMillis()
         val hand = handLandmarkEngine.detect(bitmap)
-        val card = referenceCardDetector.detect(bitmap)
+        val detectedCard = referenceCardDetector.detect(bitmap)
+        val card = cardDetectionMemory.resolve(detectedCard, frameTimestampMs)
         val bucketDecision =
             bucketClassifier.classify(
                 hand?.let { detectedHand ->

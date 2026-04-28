@@ -9,13 +9,18 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -45,6 +50,7 @@ import com.handmeasure.sample.tryon.model.sampleTryOnDemoHandoff
 import com.handmeasure.vision.HandDetection
 import com.handmeasure.vision.MediaPipeHandLandmarkEngine
 import com.handtryon.ar.ArTryOnAvailability
+import com.handtryon.ar.ArTryOnAvailabilityStatus
 import com.handtryon.ar.ArTryOnScene
 import com.handtryon.core.HandPoseProvider
 import com.handtryon.core.OptionalMeasurementProvider
@@ -60,7 +66,6 @@ import com.handtryon.domain.TryOnMode
 import com.handtryon.domain.TryOnSession
 import com.handtryon.domain.TryOnTrackingState
 import com.handtryon.domain.TryOnUpdateAction
-import com.handtryon.nonar3d.NonAr3dTryOnScene
 import com.handtryon.realtime.TryOnRealtimeAnalyzer
 import com.handtryon.render.StableRingOverlayRenderer
 import com.handtryon.ui.TryOnOverlay
@@ -71,6 +76,7 @@ import java.io.FileOutputStream
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
 @Composable
@@ -84,7 +90,7 @@ fun TryOnDemoScreen(
     val previewView =
         remember {
             PreviewView(context).apply {
-                scaleType = PreviewView.ScaleType.FIT_CENTER
+                scaleType = PreviewView.ScaleType.FILL_CENTER
                 implementationMode = PreviewView.ImplementationMode.COMPATIBLE
             }
         }
@@ -111,7 +117,7 @@ fun TryOnDemoScreen(
     var latestMeasurementHandoff by remember { mutableStateOf<TryOnDemoHandoff?>(null) }
     var arPreviewEnabled by rememberSaveable { mutableStateOf(false) }
     var hasSelectedPreviewMode by rememberSaveable { mutableStateOf(false) }
-    var arRendererError by remember { mutableStateOf<String?>(null) }
+    var rendererError by remember { mutableStateOf<String?>(null) }
     var hasTriggeredAutoMeasure by rememberSaveable { mutableStateOf(false) }
 
     val baseAsset =
@@ -126,7 +132,7 @@ fun TryOnDemoScreen(
             )
         }
     val ringAssetLoader = remember { RingAssetLoader(context.assets) }
-    val arAvailability = remember { ArTryOnAvailability.from(context) }
+    var arAvailability by remember { mutableStateOf(ArTryOnAvailability.from(context)) }
     val glbSummary = remember { runCatching { ringAssetLoader.loadGlbSummary(baseAsset) }.getOrNull() }
     val ringBitmap = remember { runCatching { ringAssetLoader.loadOverlayBitmap(baseAsset) }.getOrNull() }
     val metadata = remember { runCatching { ringAssetLoader.loadMetadata(baseAsset) }.getOrNull() }
@@ -172,10 +178,9 @@ fun TryOnDemoScreen(
     }
 
     val canUseArPreview = arAvailability.isUsableNow && !activeAsset.modelAssetPath.isNullOrBlank()
-    val canUseNonAr3dPreview = !activeAsset.modelAssetPath.isNullOrBlank()
+    val enableLegacy2dTryOn = false
     val isArPreviewActive = arPreviewEnabled && canUseArPreview
-    val isNonAr3dPreviewActive = !isArPreviewActive && canUseNonAr3dPreview
-    val isModel3dPreviewActive = isArPreviewActive || isNonAr3dPreviewActive
+    val isModel3dPreviewActive = isArPreviewActive
 
     LaunchedEffect(canUseArPreview, hasSelectedPreviewMode) {
         when {
@@ -240,6 +245,16 @@ fun TryOnDemoScreen(
         hasCameraPermission =
             ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
         if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
+    }
+
+    LaunchedEffect(context) {
+        repeat(AR_AVAILABILITY_RETRY_COUNT) {
+            arAvailability = ArTryOnAvailability.from(context)
+            if (arAvailability.status != com.handtryon.ar.ArTryOnAvailabilityStatus.Unknown) {
+                return@LaunchedEffect
+            }
+            delay(AR_AVAILABILITY_RETRY_DELAY_MS)
+        }
     }
 
     DisposableEffect(handLandmarkEngine) {
@@ -319,7 +334,12 @@ fun TryOnDemoScreen(
     val currentSession = session
     val frameWidth = latestFrame?.width ?: 0
     val frameHeight = latestFrame?.height ?: 0
-    Box(modifier = modifier.fillMaxSize()) {
+    Box(
+        modifier =
+            modifier
+                .fillMaxSize()
+                .background(Color.Black),
+    ) {
         if (isArPreviewActive) {
             ArTryOnScene(
                 modelAssetPath = activeAsset.modelAssetPath,
@@ -331,7 +351,7 @@ fun TryOnDemoScreen(
                 trackingState = currentSession?.quality?.trackingState ?: TryOnTrackingState.Searching,
                 updateAction = currentSession?.quality?.updateAction ?: TryOnUpdateAction.Update,
                 onRendererError = { throwable ->
-                    arRendererError = throwable.message ?: throwable::class.java.simpleName
+                    rendererError = "ARCore 3D: ${throwable.message ?: throwable::class.java.simpleName}"
                 },
                 onCameraFrame = { cameraFrame ->
                     val bitmap = cameraFrame.bitmap
@@ -387,24 +407,6 @@ fun TryOnDemoScreen(
                 },
                 modifier = Modifier.fillMaxSize(),
             )
-        } else if (isNonAr3dPreviewActive) {
-            AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
-            NonAr3dTryOnScene(
-                modelAssetPath = activeAsset.modelAssetPath,
-                glbSummary = glbSummary,
-                placement = currentSession?.placement,
-                frameWidth = frameWidth.takeIf { it > 0 } ?: DEMO_FALLBACK_FRAME_WIDTH,
-                frameHeight = frameHeight.takeIf { it > 0 } ?: DEMO_FALLBACK_FRAME_HEIGHT,
-                qualityScore = currentSession?.quality?.qualityScore ?: 0.62f,
-                trackingState = currentSession?.quality?.trackingState ?: TryOnTrackingState.Searching,
-                updateAction = currentSession?.quality?.updateAction ?: TryOnUpdateAction.Update,
-                handPose = latestHandPose,
-                measurement = measurementProvider.latestMeasurement(),
-                onRendererError = { throwable ->
-                    arRendererError = throwable.message ?: throwable::class.java.simpleName
-                },
-                modifier = Modifier.fillMaxSize(),
-            )
         } else {
             AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
         }
@@ -412,7 +414,8 @@ fun TryOnDemoScreen(
             modifier =
                 Modifier
                     .align(Alignment.TopStart)
-                    .padding(12.dp),
+                    .statusBarsPadding()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             onBack?.let { goBack ->
@@ -453,9 +456,9 @@ fun TryOnDemoScreen(
                             .padding(8.dp),
                 )
             }
-            arRendererError?.let { error ->
+            rendererError?.let { error ->
                 Text(
-                    text = "AR renderer error: $error",
+                    text = "3D renderer error: $error",
                     color = Color.White,
                     style = MaterialTheme.typography.bodySmall,
                     modifier =
@@ -465,7 +468,7 @@ fun TryOnDemoScreen(
                 )
             }
         }
-        if (!isModel3dPreviewActive) {
+        if (enableLegacy2dTryOn && !isModel3dPreviewActive) {
             TryOnOverlay(
                 ringBitmap = ringBitmap,
                 frameWidth = frameWidth,
@@ -512,8 +515,11 @@ fun TryOnDemoScreen(
                 Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
+                    .heightIn(max = 420.dp)
                     .background(Color(0xAA000000), RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
-                    .padding(12.dp),
+                    .navigationBarsPadding()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
@@ -530,8 +536,7 @@ fun TryOnDemoScreen(
                 text =
                     when {
                         isArPreviewActive -> "Renderer: ARCore 3D"
-                        isNonAr3dPreviewActive -> "Renderer: CameraX 3D"
-                        else -> "Renderer: legacy 2D fallback"
+                        else -> "Renderer: CameraX preview (AR inactive)"
                     },
                 color = Color(0xFFE0E0E0),
                 style = MaterialTheme.typography.bodySmall,
@@ -553,21 +558,21 @@ fun TryOnDemoScreen(
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = {
-                        arRendererError = null
+                        rendererError = null
                         hasSelectedPreviewMode = true
                         arPreviewEnabled = !arPreviewEnabled
                     },
                     modifier = Modifier.weight(1f),
                     enabled = canUseArPreview,
                 ) {
-                    Text(if (isArPreviewActive) "3D fallback" else "AR preview")
+                    Text(if (isArPreviewActive) "Tat AR" else "Bat AR")
                 }
                 Text(
                     text =
                         if (canUseArPreview) {
                             "ARCore ready"
                         } else {
-                            "AR unavailable: ${arAvailability.status}"
+                            arAvailability.toUserReadableText()
                         },
                     color = Color(0xFFE0E0E0),
                     style = MaterialTheme.typography.bodySmall,
@@ -609,7 +614,7 @@ fun TryOnDemoScreen(
                             )
                     },
                     modifier = Modifier.weight(1f),
-                    enabled = ringBitmap != null && !isModel3dPreviewActive,
+                    enabled = ringBitmap != null && enableLegacy2dTryOn && !isModel3dPreviewActive,
                 ) {
                     Text("Chỉnh tay")
                 }
@@ -662,7 +667,12 @@ fun TryOnDemoScreen(
                         rendered.bitmap.recycle()
                     },
                     modifier = Modifier.weight(1f),
-                    enabled = ringBitmap != null && latestFrame != null && currentSession != null && !isModel3dPreviewActive,
+                    enabled =
+                        ringBitmap != null &&
+                            latestFrame != null &&
+                            currentSession != null &&
+                            enableLegacy2dTryOn &&
+                            !isModel3dPreviewActive,
                 ) {
                     Text("Xuất ảnh")
                 }
@@ -779,5 +789,19 @@ private fun TryOnMode?.toModeLabel(): String =
         null -> "Thủ công"
     }
 
+private fun ArTryOnAvailability.toUserReadableText(): String =
+    when (status) {
+        ArTryOnAvailabilityStatus.SupportedNeedsInstall ->
+            "Cần cài Google Play Services for AR (ARCore / com.google.ar.core)."
+        ArTryOnAvailabilityStatus.Unsupported ->
+            "Máy không được ARCore hỗ trợ."
+        ArTryOnAvailabilityStatus.Unknown ->
+            "Đang kiểm tra ARCore. Nếu giữ nguyên, hãy cài/cập nhật Google Play Services for AR."
+        ArTryOnAvailabilityStatus.SupportedInstalled ->
+            "ARCore ready"
+    }
+
 private const val DEMO_FALLBACK_FRAME_WIDTH = 1080
 private const val DEMO_FALLBACK_FRAME_HEIGHT = 1920
+private const val AR_AVAILABILITY_RETRY_COUNT = 8
+private const val AR_AVAILABILITY_RETRY_DELAY_MS = 500L

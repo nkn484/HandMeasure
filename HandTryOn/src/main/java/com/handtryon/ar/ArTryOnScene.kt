@@ -1,5 +1,6 @@
 package com.handtryon.ar
 
+import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -56,7 +57,9 @@ fun ArTryOnScene(
         val node =
             runCatching {
                 createRingNode(modelLoader = modelLoader, modelAssetPath = modelAssetPath)
-            }.onFailure(onRendererError).getOrNull()
+            }.onFailure { throwable ->
+                reportRendererError(stage = "model", throwable = throwable, onRendererError = onRendererError)
+            }.getOrNull()
 
         if (node != null) {
             ringNode = node
@@ -101,19 +104,43 @@ fun ArTryOnScene(
                 }
             config.lightEstimationMode = Config.LightEstimationMode.ENVIRONMENTAL_HDR
         },
-        onSessionFailed = onRendererError,
+        onSessionFailed = { throwable ->
+            reportRendererError(stage = "session", throwable = throwable, onRendererError = onRendererError)
+        },
         onSessionUpdated = { _, frame ->
-            frameSampler.acquireBitmap(frame)?.let(onCameraFrame)
+            runCatching {
+                frameSampler.acquireBitmap(frame)?.let(onCameraFrame)
+            }.onFailure { throwable ->
+                reportRendererError(stage = "frame sampler", throwable = throwable, onRendererError = onRendererError)
+            }
         },
     )
 }
 
-private fun createRingNode(
+private fun reportRendererError(
+    stage: String,
+    throwable: Throwable,
+    onRendererError: (Throwable) -> Unit,
+) {
+    Log.e(TAG, "AR renderer failed at $stage", throwable)
+    onRendererError(ArTryOnStageException(stage = stage, source = throwable))
+}
+
+private class ArTryOnStageException(
+    stage: String,
+    source: Throwable,
+) : RuntimeException("$stage: ${source.message ?: source::class.java.simpleName}", source)
+
+private suspend fun createRingNode(
     modelLoader: ModelLoader,
     modelAssetPath: String,
-): ModelNode =
-    ModelNode(
-        modelInstance = modelLoader.createModelInstance(modelAssetPath),
+): ModelNode {
+    val modelInstance =
+        modelLoader.loadModelInstance(modelAssetPath)
+            ?: error("ModelLoader returned null for $modelAssetPath")
+
+    return ModelNode(
+        modelInstance = modelInstance,
         autoAnimate = false,
         scaleToUnits = null,
         centerOrigin = Float3(0f, 0f, 0f),
@@ -122,5 +149,7 @@ private fun createRingNode(
         isTouchable = false
         isVisible = false
     }
+}
 
 private const val MIN_RENDER_QUALITY = 0.18f
+private const val TAG = "ArTryOnScene"

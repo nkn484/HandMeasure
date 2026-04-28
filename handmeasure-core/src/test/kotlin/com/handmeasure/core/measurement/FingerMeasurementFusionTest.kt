@@ -34,4 +34,54 @@ class FingerMeasurementFusionTest {
 
         assertThat(result.warnings).contains(HandMeasureWarning.THICKNESS_ESTIMATED_FROM_WEAK_ANGLES)
     }
+
+    @Test
+    fun fuse_regularizesExtremeInputsWithoutDroppingResult() {
+        val fusion = FingerMeasurementFusion()
+        val result =
+            fusion.fuse(
+                listOf(
+                    StepMeasurement(
+                        step = CaptureStep.BACK_OF_HAND,
+                        widthMm = 127.44,
+                        confidence = 0.45f,
+                        measurementConfidence = 0.25f,
+                        measurementSource = WidthMeasurementSource.LANDMARK_HEURISTIC,
+                    ),
+                    StepMeasurement(
+                        step = CaptureStep.LEFT_OBLIQUE_DORSAL,
+                        widthMm = 146.53,
+                        confidence = 0.45f,
+                        measurementConfidence = 0.25f,
+                        measurementSource = WidthMeasurementSource.LANDMARK_HEURISTIC,
+                    ),
+                    StepMeasurement(
+                        step = CaptureStep.RIGHT_OBLIQUE_DORSAL,
+                        widthMm = 146.53,
+                        confidence = 0.45f,
+                        measurementConfidence = 0.25f,
+                        measurementSource = WidthMeasurementSource.LANDMARK_HEURISTIC,
+                    ),
+                    StepMeasurement(
+                        step = CaptureStep.UP_TILT_DORSAL,
+                        widthMm = 141.80,
+                        confidence = 0.45f,
+                        measurementConfidence = 0.25f,
+                        measurementSource = WidthMeasurementSource.LANDMARK_HEURISTIC,
+                    ),
+                    StepMeasurement(
+                        step = CaptureStep.DOWN_TILT_DORSAL,
+                        widthMm = 141.80,
+                        confidence = 0.45f,
+                        measurementConfidence = 0.25f,
+                        measurementSource = WidthMeasurementSource.LANDMARK_HEURISTIC,
+                    ),
+                ),
+            )
+
+        assertThat(result.circumferenceMm).isAtLeast(50.0)
+        assertThat(result.circumferenceMm).isAtMost(80.0)
+        assertThat(result.equivalentDiameterMm).isAtMost(25.5)
+        assertThat(result.confidenceScore).isLessThan(0.65f)
+    }
 }

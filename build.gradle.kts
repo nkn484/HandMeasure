@@ -12,6 +12,14 @@ plugins {
     id("org.jlleitschuh.gradle.ktlint") version "12.1.2" apply false
 }
 
+val workspaceDrive = rootProject.projectDir.toPath().root?.toString()?.trimEnd('\\') ?: "D:"
+val asciiBuildRoot = "$workspaceDrive\\handmeasure-workspace-build"
+
+allprojects {
+    val projectSegment = if (path == ":") "root" else path.removePrefix(":").replace(':', '\\')
+    layout.buildDirectory.set(file("$asciiBuildRoot\\$projectSegment"))
+}
+
 subprojects {
     plugins.withId("org.jetbrains.kotlin.android") {
         apply(plugin = "io.gitlab.arturbosch.detekt")

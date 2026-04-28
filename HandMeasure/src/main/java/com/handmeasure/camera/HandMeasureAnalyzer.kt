@@ -9,7 +9,7 @@ import java.util.concurrent.atomic.AtomicLong
 
 class HandMeasureAnalyzer(
     private val coordinator: HandMeasureCoordinator,
-    private val minAnalysisIntervalMs: Long = 120L,
+    private val minAnalysisIntervalMs: Long = 90L,
     private val onStateUpdated: (LiveAnalysisState) -> Unit,
     private val onFlowCompleted: () -> Unit,
 ) : ImageAnalysis.Analyzer {
