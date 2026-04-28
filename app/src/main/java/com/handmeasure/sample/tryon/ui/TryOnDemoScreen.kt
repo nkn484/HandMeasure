@@ -44,10 +44,13 @@ import com.handmeasure.sample.tryon.model.resolveDemoHandoff
 import com.handmeasure.sample.tryon.model.sampleTryOnDemoHandoff
 import com.handmeasure.vision.HandDetection
 import com.handmeasure.vision.MediaPipeHandLandmarkEngine
+import com.handtryon.ar.ArTryOnAvailability
+import com.handtryon.ar.ArTryOnScene
 import com.handtryon.core.HandPoseProvider
 import com.handtryon.core.OptionalMeasurementProvider
 import com.handtryon.core.TryOnSessionResolver
 import com.handtryon.data.RingAssetLoader
+import com.handtryon.domain.GlbAssetSummary
 import com.handtryon.domain.HandPoseSnapshot
 import com.handtryon.domain.LandmarkPoint
 import com.handtryon.domain.MeasurementSnapshot
@@ -57,12 +60,17 @@ import com.handtryon.domain.TryOnMode
 import com.handtryon.domain.TryOnSession
 import com.handtryon.domain.TryOnTrackingState
 import com.handtryon.domain.TryOnUpdateAction
+import com.handtryon.nonar3d.NonAr3dTryOnScene
 import com.handtryon.realtime.TryOnRealtimeAnalyzer
 import com.handtryon.render.StableRingOverlayRenderer
 import com.handtryon.ui.TryOnOverlay
 import com.handtryon.validation.RuntimeMetrics
+import com.handtryon.validation.RuntimeMetricsTracker
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.roundToInt
 
 @Composable
@@ -73,7 +81,13 @@ fun TryOnDemoScreen(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val previewView = remember { PreviewView(context).apply { scaleType = PreviewView.ScaleType.FIT_CENTER } }
+    val previewView =
+        remember {
+            PreviewView(context).apply {
+                scaleType = PreviewView.ScaleType.FIT_CENTER
+                implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+            }
+        }
     val cameraController = remember { CameraController(context) }
     val handLandmarkEngine = remember { MediaPipeHandLandmarkEngine(context) }
     val sessionResolver = remember { TryOnSessionResolver() }
@@ -81,28 +95,39 @@ fun TryOnDemoScreen(
     val exportRenderer = remember { StableRingOverlayRenderer() }
     val handPoseProvider = remember { MutableHandPoseProvider() }
     val measurementProvider = remember { MutableMeasurementProvider() }
+    val arFrameExecutor = remember { Executors.newSingleThreadExecutor() }
+    val arFrameDetectionInFlight = remember { AtomicBoolean(false) }
+    val arRuntimeMetricsTracker = remember { RuntimeMetricsTracker() }
+    val handDetectionLock = remember { Any() }
 
     var hasCameraPermission by remember { mutableStateOf(false) }
     var latestFrame by remember { mutableStateOf<Bitmap?>(null) }
+    var latestHandPose by remember { mutableStateOf<HandPoseSnapshot?>(null) }
     var session by remember { mutableStateOf<TryOnSession?>(null) }
     var manualPlacement by remember { mutableStateOf<RingPlacement?>(null) }
     var manualAdjustEnabled by remember { mutableStateOf(false) }
     var runtimeMetrics by remember { mutableStateOf<RuntimeMetrics?>(null) }
     var exportedPath by remember { mutableStateOf<String?>(null) }
     var latestMeasurementHandoff by remember { mutableStateOf<TryOnDemoHandoff?>(null) }
+    var arPreviewEnabled by rememberSaveable { mutableStateOf(false) }
+    var hasSelectedPreviewMode by rememberSaveable { mutableStateOf(false) }
+    var arRendererError by remember { mutableStateOf<String?>(null) }
     var hasTriggeredAutoMeasure by rememberSaveable { mutableStateOf(false) }
 
     val baseAsset =
         remember {
             RingAssetSource(
-                id = "single_ring_demo_v2",
-                name = "Demo Ring",
+                id = "ring_ar_glb_v1",
+                name = "AR GLB Ring",
                 overlayAssetPath = "tryon/ring_overlay_v2.png",
+                modelAssetPath = "tryon/ring_AR.glb",
                 metadataAssetPath = "tryon/normalization_report_v2.json",
                 defaultWidthRatio = 0.16f,
             )
         }
     val ringAssetLoader = remember { RingAssetLoader(context.assets) }
+    val arAvailability = remember { ArTryOnAvailability.from(context) }
+    val glbSummary = remember { runCatching { ringAssetLoader.loadGlbSummary(baseAsset) }.getOrNull() }
     val ringBitmap = remember { runCatching { ringAssetLoader.loadOverlayBitmap(baseAsset) }.getOrNull() }
     val metadata = remember { runCatching { ringAssetLoader.loadMetadata(baseAsset) }.getOrNull() }
     val activeAsset =
@@ -146,6 +171,41 @@ fun TryOnDemoScreen(
         session = resolveSessionState(measurement = null, manualPlacementOverride = null)
     }
 
+    val canUseArPreview = arAvailability.isUsableNow && !activeAsset.modelAssetPath.isNullOrBlank()
+    val canUseNonAr3dPreview = !activeAsset.modelAssetPath.isNullOrBlank()
+    val isArPreviewActive = arPreviewEnabled && canUseArPreview
+    val isNonAr3dPreviewActive = !isArPreviewActive && canUseNonAr3dPreview
+    val isModel3dPreviewActive = isArPreviewActive || isNonAr3dPreviewActive
+
+    LaunchedEffect(canUseArPreview, hasSelectedPreviewMode) {
+        when {
+            canUseArPreview && !hasSelectedPreviewMode -> arPreviewEnabled = true
+            !canUseArPreview -> {
+                arPreviewEnabled = false
+                hasSelectedPreviewMode = false
+            }
+        }
+    }
+
+    LaunchedEffect(isArPreviewActive) {
+        if (isArPreviewActive && manualAdjustEnabled) {
+            manualAdjustEnabled = false
+            manualPlacement = null
+            session = resolveSessionState(manualPlacementOverride = null)
+        }
+    }
+
+    LaunchedEffect(activeAsset) {
+        if (session == null) {
+            session =
+                resolveSessionState(
+                    handPose = null,
+                    measurement = null,
+                    previousSessionOverride = null,
+                )
+        }
+    }
+
     val permissionLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             hasCameraPermission = granted
@@ -182,19 +242,38 @@ fun TryOnDemoScreen(
         if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
     }
 
-    DisposableEffect(lifecycleOwner, hasCameraPermission, handLandmarkEngine, activeAsset) {
-        if (!hasCameraPermission) {
+    DisposableEffect(handLandmarkEngine) {
+        onDispose {
+            handLandmarkEngine.close()
+        }
+    }
+
+    DisposableEffect(ringBitmap) {
+        onDispose {
+            ringBitmap?.recycle()
+        }
+    }
+
+    DisposableEffect(arFrameExecutor) {
+        onDispose {
+            arFrameExecutor.shutdownNow()
+        }
+    }
+
+    DisposableEffect(lifecycleOwner, hasCameraPermission, handLandmarkEngine, activeAsset, isArPreviewActive) {
+        if (!hasCameraPermission || isArPreviewActive) {
             onDispose { }
         } else {
             val analyzer =
                 TryOnRealtimeAnalyzer(
                     minDetectionIntervalMs = 110L,
                     onDetectionFrame = { frame, timestampMs ->
-                        val detection = handLandmarkEngine.detect(frame)
-                        val pose = detection?.toPoseSnapshot(frame.width, frame.height, timestampMs)
-                        ContextCompat.getMainExecutor(context).execute {
-                            handPoseProvider.snapshot = pose
-                            latestFrame = upsertSnapshot(latestFrame, frame)
+                        val detection = synchronized(handDetectionLock) { handLandmarkEngine.detect(frame) }
+                            val pose = detection?.toPoseSnapshot(frame.width, frame.height, timestampMs)
+                            ContextCompat.getMainExecutor(context).execute {
+                                handPoseProvider.snapshot = pose
+                                latestHandPose = pose
+                                latestFrame = upsertSnapshot(latestFrame, frame)
                             if (!manualAdjustEnabled || session == null) {
                                 session =
                                     resolveSessionState(
@@ -229,12 +308,10 @@ fun TryOnDemoScreen(
             onDispose {
                 analyzer.close()
                 cameraController.shutdown()
-                handLandmarkEngine.close()
                 previewRenderer.reset()
                 exportRenderer.reset()
                 latestFrame?.recycle()
                 latestFrame = null
-                ringBitmap?.recycle()
             }
         }
     }
@@ -243,7 +320,94 @@ fun TryOnDemoScreen(
     val frameWidth = latestFrame?.width ?: 0
     val frameHeight = latestFrame?.height ?: 0
     Box(modifier = modifier.fillMaxSize()) {
-        AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+        if (isArPreviewActive) {
+            ArTryOnScene(
+                modelAssetPath = activeAsset.modelAssetPath,
+                glbSummary = glbSummary,
+                placement = currentSession?.placement,
+                frameWidth = frameWidth.takeIf { it > 0 } ?: DEMO_FALLBACK_FRAME_WIDTH,
+                frameHeight = frameHeight.takeIf { it > 0 } ?: DEMO_FALLBACK_FRAME_HEIGHT,
+                qualityScore = currentSession?.quality?.qualityScore ?: 0.62f,
+                trackingState = currentSession?.quality?.trackingState ?: TryOnTrackingState.Searching,
+                updateAction = currentSession?.quality?.updateAction ?: TryOnUpdateAction.Update,
+                onRendererError = { throwable ->
+                    arRendererError = throwable.message ?: throwable::class.java.simpleName
+                },
+                onCameraFrame = { cameraFrame ->
+                    val bitmap = cameraFrame.bitmap
+                    if (!arFrameDetectionInFlight.compareAndSet(false, true)) {
+                        bitmap.recycle()
+                        return@ArTryOnScene
+                    }
+                    try {
+                        arFrameExecutor.execute {
+                            try {
+                                arRuntimeMetricsTracker.onFrameAnalyzed()
+                                val startNs = System.nanoTime()
+                                val detection = synchronized(handDetectionLock) { handLandmarkEngine.detect(bitmap) }
+                                val detectionDurationNs = System.nanoTime() - startNs
+                                arRuntimeMetricsTracker.onDetectionUpdate(
+                                    durationNs = detectionDurationNs,
+                                    timestampMs = cameraFrame.timestampMs,
+                                )
+                                val metrics = arRuntimeMetricsTracker.snapshot()
+                                val pose = detection?.toPoseSnapshot(bitmap.width, bitmap.height, cameraFrame.timestampMs)
+                                ContextCompat.getMainExecutor(context).execute {
+                                    try {
+                                        runtimeMetrics = metrics
+                                        handPoseProvider.snapshot = pose
+                                        latestHandPose = pose
+                                        latestFrame = upsertSnapshot(latestFrame, bitmap)
+                                        if (!manualAdjustEnabled || session == null) {
+                                            session =
+                                                resolveSessionState(
+                                                    frameWidth = bitmap.width,
+                                                    frameHeight = bitmap.height,
+                                                    nowMs = cameraFrame.timestampMs,
+                                                )
+                                            if (session?.mode != TryOnMode.Manual) {
+                                                manualPlacement = null
+                                                manualAdjustEnabled = false
+                                            }
+                                        }
+                                    } finally {
+                                        bitmap.recycle()
+                                        arFrameDetectionInFlight.set(false)
+                                    }
+                                }
+                            } catch (_: Throwable) {
+                                bitmap.recycle()
+                                arFrameDetectionInFlight.set(false)
+                            }
+                        }
+                    } catch (_: RejectedExecutionException) {
+                        bitmap.recycle()
+                        arFrameDetectionInFlight.set(false)
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else if (isNonAr3dPreviewActive) {
+            AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+            NonAr3dTryOnScene(
+                modelAssetPath = activeAsset.modelAssetPath,
+                glbSummary = glbSummary,
+                placement = currentSession?.placement,
+                frameWidth = frameWidth.takeIf { it > 0 } ?: DEMO_FALLBACK_FRAME_WIDTH,
+                frameHeight = frameHeight.takeIf { it > 0 } ?: DEMO_FALLBACK_FRAME_HEIGHT,
+                qualityScore = currentSession?.quality?.qualityScore ?: 0.62f,
+                trackingState = currentSession?.quality?.trackingState ?: TryOnTrackingState.Searching,
+                updateAction = currentSession?.quality?.updateAction ?: TryOnUpdateAction.Update,
+                handPose = latestHandPose,
+                measurement = measurementProvider.latestMeasurement(),
+                onRendererError = { throwable ->
+                    arRendererError = throwable.message ?: throwable::class.java.simpleName
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+        }
         Column(
             modifier =
                 Modifier
@@ -278,46 +442,70 @@ fun TryOnDemoScreen(
                             .padding(8.dp),
                 )
             }
+            if (glbSummary != null && ringBitmap == null) {
+                Text(
+                    text = "GLB loaded, but 2D fallback overlay is missing.",
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier =
+                        Modifier
+                            .background(Color(0xAA000000), RoundedCornerShape(8.dp))
+                            .padding(8.dp),
+                )
+            }
+            arRendererError?.let { error ->
+                Text(
+                    text = "AR renderer error: $error",
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier =
+                        Modifier
+                            .background(Color(0xAA000000), RoundedCornerShape(8.dp))
+                            .padding(8.dp),
+                )
+            }
         }
-        TryOnOverlay(
-            ringBitmap = ringBitmap,
-            frameWidth = frameWidth,
-            frameHeight = frameHeight,
-            placement = currentSession?.placement,
-            anchor = currentSession?.anchor,
-            renderer = previewRenderer,
-            mode = currentSession?.mode ?: TryOnMode.LandmarkOnly,
-            qualityScore = currentSession?.quality?.qualityScore ?: (currentSession?.anchor?.confidence ?: 0.62f),
-            trackingState = currentSession?.quality?.trackingState ?: TryOnTrackingState.Searching,
-            updateAction = currentSession?.quality?.updateAction ?: TryOnUpdateAction.Update,
-            manualAdjustEnabled = manualAdjustEnabled || currentSession?.mode == TryOnMode.Manual,
-            onManualTransform = { panXFrame, panYFrame, zoom, rotationDeg ->
-                val oldPlacement = manualPlacement ?: currentSession?.placement ?: return@TryOnOverlay
-                val baseSession =
-                    currentSession
-                        ?: sessionResolver.resolve(
-                            asset = activeAsset,
-                            handPose = handPoseProvider.latestPose(),
-                            measurement = measurementProvider.latestMeasurement(),
-                            manualPlacement = oldPlacement,
-                            previousSession = null,
-                            frameWidth = frameWidth.coerceAtLeast(1080),
-                            frameHeight = frameHeight.coerceAtLeast(1920),
+        if (!isModel3dPreviewActive) {
+            TryOnOverlay(
+                ringBitmap = ringBitmap,
+                frameWidth = frameWidth,
+                frameHeight = frameHeight,
+                placement = currentSession?.placement,
+                anchor = currentSession?.anchor,
+                renderer = previewRenderer,
+                mode = currentSession?.mode ?: TryOnMode.LandmarkOnly,
+                qualityScore = currentSession?.quality?.qualityScore ?: (currentSession?.anchor?.confidence ?: 0.62f),
+                trackingState = currentSession?.quality?.trackingState ?: TryOnTrackingState.Searching,
+                updateAction = currentSession?.quality?.updateAction ?: TryOnUpdateAction.Update,
+                manualAdjustEnabled = manualAdjustEnabled || currentSession?.mode == TryOnMode.Manual,
+                onManualTransform = { panXFrame, panYFrame, zoom, rotationDeg ->
+                    val oldPlacement = manualPlacement ?: currentSession?.placement ?: return@TryOnOverlay
+                    val baseSession =
+                        currentSession
+                            ?: sessionResolver.resolve(
+                                asset = activeAsset,
+                                handPose = handPoseProvider.latestPose(),
+                                measurement = measurementProvider.latestMeasurement(),
+                                manualPlacement = oldPlacement,
+                                previousSession = null,
+                                frameWidth = frameWidth.coerceAtLeast(1080),
+                                frameHeight = frameHeight.coerceAtLeast(1920),
+                            )
+                    val safeFrameWidth = frameWidth.coerceAtLeast(1)
+                    val next =
+                        oldPlacement.copy(
+                            centerX = oldPlacement.centerX + panXFrame,
+                            centerY = oldPlacement.centerY + panYFrame,
+                            ringWidthPx = (oldPlacement.ringWidthPx * zoom).coerceIn(20f, safeFrameWidth * 0.6f),
+                            rotationDegrees = oldPlacement.rotationDegrees + rotationDeg,
                         )
-                val safeFrameWidth = frameWidth.coerceAtLeast(1)
-                val next =
-                    oldPlacement.copy(
-                        centerX = oldPlacement.centerX + panXFrame,
-                        centerY = oldPlacement.centerY + panYFrame,
-                        ringWidthPx = (oldPlacement.ringWidthPx * zoom).coerceIn(20f, safeFrameWidth * 0.6f),
-                        rotationDegrees = oldPlacement.rotationDegrees + rotationDeg,
-                    )
-                manualPlacement = next
-                manualAdjustEnabled = true
-                session = baseSession.copy(mode = TryOnMode.Manual, placement = next)
-            },
-            modifier = Modifier.fillMaxSize(),
-        )
+                    manualPlacement = next
+                    manualAdjustEnabled = true
+                    session = baseSession.copy(mode = TryOnMode.Manual, placement = next)
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
 
         Column(
             modifier =
@@ -340,6 +528,23 @@ fun TryOnDemoScreen(
             )
             Text(
                 text =
+                    when {
+                        isArPreviewActive -> "Renderer: ARCore 3D"
+                        isNonAr3dPreviewActive -> "Renderer: CameraX 3D"
+                        else -> "Renderer: legacy 2D fallback"
+                    },
+                color = Color(0xFFE0E0E0),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            glbSummary.toReadableText()?.let { modelText ->
+                Text(
+                    text = modelText,
+                    color = Color(0xFFE0E0E0),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Text(
+                text =
                     latestMeasurementHandoff?.summary
                         ?: "Handoff: chưa có. Hãy dùng Đo tay hoặc Dùng handoff mẫu để hoàn tất luồng demo.",
                 color = Color(0xFFB2FF59),
@@ -348,11 +553,35 @@ fun TryOnDemoScreen(
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = {
+                        arRendererError = null
+                        hasSelectedPreviewMode = true
+                        arPreviewEnabled = !arPreviewEnabled
+                    },
+                    modifier = Modifier.weight(1f),
+                    enabled = canUseArPreview,
+                ) {
+                    Text(if (isArPreviewActive) "3D fallback" else "AR preview")
+                }
+                Text(
+                    text =
+                        if (canUseArPreview) {
+                            "ARCore ready"
+                        } else {
+                            "AR unavailable: ${arAvailability.status}"
+                        },
+                    color = Color(0xFFE0E0E0),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = {
                         manualAdjustEnabled = false
                         session = resolveSessionState(manualPlacementOverride = null)
                     },
                     modifier = Modifier.weight(1f),
-                    enabled = ringBitmap != null,
+                    enabled = ringBitmap != null && !isArPreviewActive,
                 ) {
                     Text("Nhận diện tay")
                 }
@@ -380,7 +609,7 @@ fun TryOnDemoScreen(
                             )
                     },
                     modifier = Modifier.weight(1f),
-                    enabled = ringBitmap != null,
+                    enabled = ringBitmap != null && !isModel3dPreviewActive,
                 ) {
                     Text("Chỉnh tay")
                 }
@@ -433,6 +662,7 @@ fun TryOnDemoScreen(
                         rendered.bitmap.recycle()
                     },
                     modifier = Modifier.weight(1f),
+                    enabled = ringBitmap != null && latestFrame != null && currentSession != null && !isModel3dPreviewActive,
                 ) {
                     Text("Xuất ảnh")
                 }
@@ -502,6 +732,18 @@ private fun RuntimeMetrics?.toRuntimeText(): String {
             (1000.0 / metrics.avgUpdateIntervalMs).roundToInt()
         }
     return "Realtime nhận diện=${"%.1f".format(metrics.avgDetectionMs)} ms, cập nhật=${hz} Hz, chênh bộ nhớ=${metrics.approxMemoryDeltaKb} KB"
+}
+
+private fun GlbAssetSummary?.toReadableText(): String? {
+    val summary = this ?: return null
+    val bounds = summary.estimatedBoundsMm
+    val boundsText =
+        if (bounds == null) {
+            "unknown bounds"
+        } else {
+            "bounds ${"%.2f".format(bounds.x)} x ${"%.2f".format(bounds.y)} x ${"%.2f".format(bounds.z)} mm"
+        }
+    return "GLB: v${summary.glbVersion}, mesh=${summary.meshCount}, material=${summary.materialCount}, $boundsText"
 }
 
 private fun HandDetection.toPoseSnapshot(

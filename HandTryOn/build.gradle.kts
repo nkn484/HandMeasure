@@ -43,6 +43,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.camera:camera-core:1.4.1")
+    implementation("io.github.sceneview:arsceneview:2.0.4")
 
     debugImplementation(composeBom)
     debugImplementation("androidx.compose.ui:ui-tooling")

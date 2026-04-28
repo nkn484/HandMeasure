@@ -5,11 +5,30 @@ import android.graphics.Bitmap
 data class RingAssetSource(
     val id: String,
     val name: String,
-    val overlayAssetPath: String,
+    val overlayAssetPath: String? = null,
+    val modelAssetPath: String? = null,
     val metadataAssetPath: String? = null,
     val defaultWidthRatio: Float = 0.16f,
     val rotationBiasDeg: Float = 0f,
-)
+) {
+    init {
+        require(!overlayAssetPath.isNullOrBlank() || !modelAssetPath.isNullOrBlank()) {
+            "RingAssetSource requires at least one asset path (overlayAssetPath or modelAssetPath)."
+        }
+    }
+
+    val assetKind: RingAssetKind
+        get() =
+            when {
+                !modelAssetPath.isNullOrBlank() -> RingAssetKind.ModelGlb
+                else -> RingAssetKind.Overlay2D
+            }
+}
+
+enum class RingAssetKind {
+    Overlay2D,
+    ModelGlb,
+}
 
 data class NormalizedAssetMetadata(
     val sourceFile: String,
@@ -21,6 +40,24 @@ data class NormalizedAssetMetadata(
     val assetQualityScore: Float,
     val backgroundRemovalConfidence: Float,
     val notes: List<String>,
+)
+
+data class GlbBoundsMm(
+    val x: Float,
+    val y: Float,
+    val z: Float,
+)
+
+data class GlbAssetSummary(
+    val modelAssetPath: String,
+    val glbVersion: Int,
+    val gltfVersion: String?,
+    val generator: String?,
+    val meshCount: Int,
+    val materialCount: Int,
+    val nodeCount: Int,
+    val estimatedBoundsMm: GlbBoundsMm?,
+    val notes: List<String> = emptyList(),
 )
 
 data class IntBounds(

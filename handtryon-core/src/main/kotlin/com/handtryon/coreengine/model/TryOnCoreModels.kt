@@ -3,11 +3,18 @@ package com.handtryon.coreengine.model
 data class TryOnAssetSource(
     val id: String,
     val name: String,
-    val overlayAssetPath: String,
+    val overlayAssetPath: String? = null,
+    val modelAssetPath: String? = null,
     val metadataAssetPath: String? = null,
     val defaultWidthRatio: Float = 0.16f,
     val rotationBiasDeg: Float = 0f,
-)
+) {
+    init {
+        require(!overlayAssetPath.isNullOrBlank() || !modelAssetPath.isNullOrBlank()) {
+            "TryOnAssetSource requires at least one asset path (overlayAssetPath or modelAssetPath)."
+        }
+    }
+}
 
 data class TryOnLandmarkPoint(
     val x: Float,
