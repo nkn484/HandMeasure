@@ -48,6 +48,29 @@ data class GlbBoundsMm(
     val z: Float,
 )
 
+data class GlbPivotMetadata(
+    val x: Float = 0f,
+    val y: Float = 0f,
+    val z: Float = 0f,
+    val units: String = "model",
+)
+
+data class GlbScaleMetadata(
+    val units: String? = null,
+    val unitsToMeters: Float = 1f,
+    val defaultScale: Float = 1f,
+    val authoredWidthMm: Float? = null,
+)
+
+data class GlbMaterialMetadata(
+    val name: String? = null,
+    val baseColorFactor: List<Float> = emptyList(),
+    val metallicFactor: Float? = null,
+    val roughnessFactor: Float? = null,
+    val alphaMode: String? = null,
+    val doubleSided: Boolean = false,
+)
+
 data class GlbAssetSummary(
     val modelAssetPath: String,
     val glbVersion: Int,
@@ -57,8 +80,16 @@ data class GlbAssetSummary(
     val materialCount: Int,
     val nodeCount: Int,
     val estimatedBoundsMm: GlbBoundsMm?,
+    val pivot: GlbPivotMetadata? = null,
+    val scale: GlbScaleMetadata = GlbScaleMetadata(),
+    val materials: List<GlbMaterialMetadata> = emptyList(),
     val notes: List<String> = emptyList(),
-)
+) {
+    val effectiveModelWidthMm: Float?
+        get() =
+            scale.authoredWidthMm?.takeIf { it > 0f }
+                ?: estimatedBoundsMm?.let { kotlin.math.max(it.x, it.y) }
+}
 
 data class IntBounds(
     val left: Int,

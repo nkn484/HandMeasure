@@ -1,6 +1,7 @@
 package com.handtryon.coreengine
 
 import com.google.common.truth.Truth.assertThat
+import com.handtryon.coreengine.model.RingFingerPoseRejectReason
 import com.handtryon.coreengine.model.TryOnHandPoseSnapshot
 import com.handtryon.coreengine.model.TryOnLandmarkPoint
 import org.junit.Test
@@ -17,6 +18,8 @@ class RingFingerPoseSolverTest {
         assertThat(pose.tangentPx.y).isGreaterThan(0.9f)
         assertThat(pose.fingerWidthPx).isGreaterThan(18f)
         assertThat(pose.confidence).isGreaterThan(0.2f)
+        assertThat(pose.diagnostics).isNotNull()
+        assertThat(pose.diagnostics!!.extensionRatio).isGreaterThan(0.9f)
     }
 
     @Test
@@ -41,7 +44,7 @@ class RingFingerPoseSolverTest {
 
         assertThat(pose).isNull()
         assertThat(RingFingerPoseSolver().rejectReason(handPose(landmarks)))
-            .isEqualTo(com.handtryon.coreengine.model.RingFingerPoseRejectReason.UnstableGeometry)
+            .isEqualTo(RingFingerPoseRejectReason.FingerCurled)
     }
 
     @Test
@@ -55,7 +58,7 @@ class RingFingerPoseSolverTest {
 
         assertThat(pose).isNull()
         assertThat(RingFingerPoseSolver().rejectReason(handPose(landmarks)))
-            .isEqualTo(com.handtryon.coreengine.model.RingFingerPoseRejectReason.UnstableGeometry)
+            .isEqualTo(RingFingerPoseRejectReason.DistalSegmentHidden)
     }
 
     @Test
@@ -70,13 +73,100 @@ class RingFingerPoseSolverTest {
 
         assertThat(pose).isNull()
         assertThat(RingFingerPoseSolver().rejectReason(handPose(landmarks)))
-            .isEqualTo(com.handtryon.coreengine.model.RingFingerPoseRejectReason.UnstableGeometry)
+            .isEqualTo(RingFingerPoseRejectReason.PointsTowardWrist)
     }
 
-    private fun handPose(landmarks: List<TryOnLandmarkPoint> = defaultLandmarks()): TryOnHandPoseSnapshot =
+    @Test
+    fun evaluate_returnsDiagnosticsForRejectedPose() {
+        val landmarks = defaultLandmarks().toMutableList()
+        landmarks[13] = TryOnLandmarkPoint(540f, 640f, 0f)
+        landmarks[14] = TryOnLandmarkPoint(540f, 720f, 0f)
+        landmarks[15] = TryOnLandmarkPoint(600f, 705f, 0f)
+
+        val result = RingFingerPoseSolver().evaluate(handPose(landmarks))
+
+        assertThat(result.usable).isFalse()
+        assertThat(result.rejectReason).isEqualTo(RingFingerPoseRejectReason.FingerCurled)
+        assertThat(result.diagnostics.rejectReason).isEqualTo(RingFingerPoseRejectReason.FingerCurled)
+        assertThat(result.diagnostics.bendCosine).isLessThan(0.5f)
+    }
+
+    @Test
+    fun solve_keepsLowerPalmNearVerticalFingerOnVerticalCenter() {
+        val landmarks = defaultLandmarks().toMutableList()
+        landmarks[0] = TryOnLandmarkPoint(240f, 1050f, 0f)
+        landmarks[9] = TryOnLandmarkPoint(310f, 760f, 0f)
+        landmarks[13] = TryOnLandmarkPoint(240f, 755f, 0f)
+        landmarks[14] = TryOnLandmarkPoint(226f, 603f, 0f)
+        landmarks[15] = TryOnLandmarkPoint(216f, 511f, 0f)
+        landmarks[17] = TryOnLandmarkPoint(170f, 765f, 0f)
+
+        val pose = RingFingerPoseSolver().solve(handPose(landmarks, frameWidth = 720, frameHeight = 1280))
+
+        assertThat(pose).isNotNull()
+        assertThat(pose!!.diagnostics!!.centerOnMcpToPip).isWithin(0.001f).of(0.64f)
+        assertThat(pose.diagnostics!!.lateralOffsetPx).isWithin(0.001f).of(0f)
+    }
+
+    @Test
+    fun solve_usesDefaultCenterForUpperPalmNearVerticalFinger() {
+        val landmarks = defaultLandmarks().toMutableList()
+        landmarks[0] = TryOnLandmarkPoint(465f, 900f, 0f)
+        landmarks[9] = TryOnLandmarkPoint(395f, 606f, 0f)
+        landmarks[13] = TryOnLandmarkPoint(465f, 606f, 0f)
+        landmarks[14] = TryOnLandmarkPoint(461f, 506f, 0f)
+        landmarks[15] = TryOnLandmarkPoint(456f, 451f, 0f)
+        landmarks[17] = TryOnLandmarkPoint(535f, 606f, 0f)
+
+        val pose = RingFingerPoseSolver().solve(handPose(landmarks, frameWidth = 720, frameHeight = 1280))
+
+        assertThat(pose).isNotNull()
+        assertThat(pose!!.diagnostics!!.centerOnMcpToPip).isWithin(0.001f).of(0.34f)
+        assertThat(pose.diagnostics!!.lateralOffsetPx).isLessThan(0f)
+    }
+
+    @Test
+    fun solve_keepsMidPalmNearVerticalFingerOnMidPalmCenter() {
+        val landmarks = defaultLandmarks().toMutableList()
+        landmarks[0] = TryOnLandmarkPoint(343f, 960f, 0f)
+        landmarks[9] = TryOnLandmarkPoint(285f, 698f, 0f)
+        landmarks[13] = TryOnLandmarkPoint(343f, 698f, 0f)
+        landmarks[14] = TryOnLandmarkPoint(345f, 611f, 0f)
+        landmarks[15] = TryOnLandmarkPoint(346f, 562f, 0f)
+        landmarks[17] = TryOnLandmarkPoint(405f, 698f, 0f)
+
+        val pose = RingFingerPoseSolver().solve(handPose(landmarks, frameWidth = 720, frameHeight = 1280))
+
+        assertThat(pose).isNotNull()
+        assertThat(pose!!.diagnostics!!.centerOnMcpToPip).isWithin(0.001f).of(0.30f)
+        assertThat(pose.diagnostics!!.lateralOffsetPx).isGreaterThan(0f)
+    }
+
+    @Test
+    fun solve_usesDefaultCenterForObliqueFingerNearMidPalmBoundary() {
+        val landmarks = defaultLandmarks().toMutableList()
+        landmarks[0] = TryOnLandmarkPoint(220f, 900f, 0f)
+        landmarks[9] = TryOnLandmarkPoint(160f, 641f, 0f)
+        landmarks[13] = TryOnLandmarkPoint(221f, 641f, 0f)
+        landmarks[14] = TryOnLandmarkPoint(277f, 456f, 0f)
+        landmarks[15] = TryOnLandmarkPoint(334f, 340f, 0f)
+        landmarks[17] = TryOnLandmarkPoint(285f, 641f, 0f)
+
+        val pose = RingFingerPoseSolver().solve(handPose(landmarks, frameWidth = 720, frameHeight = 1280))
+
+        assertThat(pose).isNotNull()
+        assertThat(pose!!.diagnostics!!.centerOnMcpToPip).isWithin(0.001f).of(0.34f)
+        assertThat(pose.diagnostics!!.lateralOffsetPx).isLessThan(0f)
+    }
+
+    private fun handPose(
+        landmarks: List<TryOnLandmarkPoint> = defaultLandmarks(),
+        frameWidth: Int = 1080,
+        frameHeight: Int = 1920,
+    ): TryOnHandPoseSnapshot =
         TryOnHandPoseSnapshot(
-            frameWidth = 1080,
-            frameHeight = 1920,
+            frameWidth = frameWidth,
+            frameHeight = frameHeight,
             landmarks = landmarks,
             confidence = 0.86f,
             timestampMs = 1_000L,

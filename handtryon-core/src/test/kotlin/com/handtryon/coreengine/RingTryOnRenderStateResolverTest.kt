@@ -5,6 +5,8 @@ import com.handtryon.coreengine.model.RingFingerPose
 import com.handtryon.coreengine.model.RingFitSource
 import com.handtryon.coreengine.model.RingFitState
 import com.handtryon.coreengine.model.TryOnInputQuality
+import com.handtryon.coreengine.model.TryOnRenderPass
+import com.handtryon.coreengine.model.TryOnUpdateAction
 import com.handtryon.coreengine.model.TryOnPoint2
 import com.handtryon.coreengine.model.TryOnVec2
 import org.junit.Test
@@ -33,6 +35,32 @@ class RingTryOnRenderStateResolverTest {
         assertThat(state.ringTransform.positionMeters.z).isEqualTo(-0.42f)
         assertThat(state.ringTransform.rotationDegrees.x).isEqualTo(90f)
         assertThat(state.fingerOccluder).isNotNull()
+        assertThat(state.fingerOccluder!!.depthMeters).isWithin(0.001f).of(0.422f)
+        assertThat(state.renderPasses).containsExactly(TryOnRenderPass.FingerDepthPrepass, TryOnRenderPass.RingModel).inOrder()
+        assertThat(state.visualQa!!.passesBasicGate).isTrue()
+    }
+
+    @Test
+    fun resolve_removesRenderPassesWhenRuntimeRequestsHide() {
+        val state =
+            RingTryOnRenderStateResolver().resolve(
+                fingerPose = pose(),
+                fitState = fit(),
+                quality =
+                    TryOnInputQuality(
+                        measurementUsable = true,
+                        landmarkUsable = true,
+                        measurementConfidence = 0.8f,
+                        landmarkConfidence = 0.86f,
+                        usedLastGoodAnchor = false,
+                        qualityScore = 0.78f,
+                        updateAction = TryOnUpdateAction.Hide,
+                    ),
+                frameWidth = 1080,
+                frameHeight = 1920,
+            )
+
+        assertThat(state.renderPasses).isEmpty()
     }
 
     private fun pose(): RingFingerPose =

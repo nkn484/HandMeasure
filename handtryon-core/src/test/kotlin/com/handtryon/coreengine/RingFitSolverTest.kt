@@ -29,6 +29,7 @@ class RingFitSolverTest {
         assertThat(fit.ringOuterDiameterMm).isEqualTo(19.8f)
         assertThat(fit.modelScale).isWithin(0.001f).of(19.8f / 20.4f)
         assertThat(fit.confidence).isGreaterThan(0.6f)
+        assertThat(fit.diagnostics!!.measuredWidthRatio).isWithin(0.001f).of(19.8f / 17.4f)
     }
 
     @Test
@@ -56,6 +57,7 @@ class RingFitSolverTest {
 
         assertThat(fit.source).isEqualTo(RingFitSource.VisualEstimate)
         assertThat(fit.targetWidthPx).isWithin(0.001f).of(33.12f)
+        assertThat(fit.diagnostics!!.visualRingToFingerWidthRatio).isWithin(0.001f).of(0.46f)
     }
 
     @Test

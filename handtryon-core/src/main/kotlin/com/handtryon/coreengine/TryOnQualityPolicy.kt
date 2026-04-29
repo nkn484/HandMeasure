@@ -4,6 +4,7 @@ import com.handtryon.coreengine.model.TryOnMode
 import com.handtryon.coreengine.model.TryOnPlacementValidation
 import com.handtryon.coreengine.model.TryOnTrackingState
 import com.handtryon.coreengine.model.TryOnUpdateAction
+import com.handtryon.coreengine.validation.TryOnTemporalJitterMetrics
 
 data class TryOnQualitySignals(
     val mode: TryOnMode,
@@ -17,6 +18,7 @@ data class TryOnQualitySignals(
     val validation: TryOnPlacementValidation,
     val trackingState: TryOnTrackingState,
     val hasPreviousPlacement: Boolean,
+    val temporalMetrics: TryOnTemporalJitterMetrics? = null,
 )
 
 data class TryOnQualityEvaluation(
@@ -25,7 +27,20 @@ data class TryOnQualityEvaluation(
     val hints: List<String>,
 )
 
-class TryOnQualityPolicy {
+data class TryOnQualityPolicyConfig(
+    val landmarkWeight: Float = 0.52f,
+    val measurementWeight: Float = 0.18f,
+    val jumpWeight: Float = 0.16f,
+    val validationWeight: Float = 0.06f,
+    val temporalWeight: Float = 0.08f,
+    val fallbackPenalty: Float = 0.12f,
+    val multiValidationPenalty: Float = 0.28f,
+    val singleValidationPenalty: Float = 0.18f,
+)
+
+class TryOnQualityPolicy(
+    private val config: TryOnQualityPolicyConfig = TryOnQualityPolicyConfig(),
+) {
     fun score(signals: TryOnQualitySignals): Float {
         val landmarkComponent =
             if (signals.landmarkUsable) {
@@ -43,15 +58,17 @@ class TryOnQualityPolicy {
         val validationPenalty =
             when {
                 signals.validation.isPlacementUsable -> 0f
-                signals.validation.notes.size >= 2 -> 0.28f
-                else -> 0.18f
+                signals.validation.notes.size >= 2 -> config.multiValidationPenalty
+                else -> config.singleValidationPenalty
             }
-        val fallbackPenalty = if (signals.usedLastGoodAnchor) 0.12f else 0f
+        val fallbackPenalty = if (signals.usedLastGoodAnchor) config.fallbackPenalty else 0f
+        val temporalComponent = temporalComponent(signals.temporalMetrics)
         val rawScore =
-            landmarkComponent * 0.56f +
-                measurementComponent * 0.2f +
-                (1f - jumpPenalty).coerceIn(0f, 1f) * 0.18f +
-                (if (signals.validation.isPlacementUsable) 1f else 0.5f) * 0.06f -
+            landmarkComponent * config.landmarkWeight +
+                measurementComponent * config.measurementWeight +
+                (1f - jumpPenalty).coerceIn(0f, 1f) * config.jumpWeight +
+                (if (signals.validation.isPlacementUsable) 1f else 0.5f) * config.validationWeight +
+                temporalComponent * config.temporalWeight -
                 validationPenalty -
                 fallbackPenalty
         return rawScore.coerceIn(0f, 1f)
@@ -114,7 +131,23 @@ class TryOnQualityPolicy {
         if (signals.anchorJumpPx > 34f || signals.placementJumpRatio > 0.5f) hints += "movement_fast"
         if (signals.validation.notes.contains("far_from_anchor")) hints += "ring_finger_visibility_low"
         if (signals.validation.notes.contains("rotation_jump_high")) hints += "rotation_unstable"
+        signals.temporalMetrics?.warnings.orEmpty().forEach { warning ->
+            when (warning) {
+                "center_jitter_high" -> hints += "center_jitter_high"
+                "scale_jitter_high" -> hints += "scale_unstable"
+                "rotation_jitter_high" -> hints += "rotation_unstable"
+                "update_rate_low" -> hints += "tracking_update_rate_low"
+            }
+        }
         if (score < 0.28f) hints += "tracking_lost"
         return hints.distinct()
+    }
+
+    private fun temporalComponent(metrics: TryOnTemporalJitterMetrics?): Float {
+        val temporal = metrics ?: return 0.72f
+        if (temporal.measuredSampleCount < 2) return 0.5f
+        val warningPenalty = (temporal.warnings.size * 0.18f).coerceAtMost(0.72f)
+        val hiddenPenalty = (temporal.hiddenFrames.toFloat() / temporal.sampleCount.coerceAtLeast(1).toFloat()).coerceIn(0f, 0.5f)
+        return (1f - warningPenalty - hiddenPenalty).coerceIn(0f, 1f)
     }
 }

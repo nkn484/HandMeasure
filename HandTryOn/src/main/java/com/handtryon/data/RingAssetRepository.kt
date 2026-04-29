@@ -5,6 +5,9 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import com.handtryon.domain.GlbAssetSummary
 import com.handtryon.domain.GlbBoundsMm
+import com.handtryon.domain.GlbMaterialMetadata
+import com.handtryon.domain.GlbPivotMetadata
+import com.handtryon.domain.GlbScaleMetadata
 import com.handtryon.domain.IntBounds
 import com.handtryon.domain.NormalizedAssetMetadata
 import com.handtryon.domain.PointF
@@ -114,7 +117,10 @@ class RingAssetLoader(
         val jsonText = bytes.copyOfRange(jsonStart, jsonEnd).toString(Charsets.UTF_8).trimEnd('\u0000')
         val root = JSONObject(jsonText)
 
-        val boundsMm = parseEstimatedBoundsMm(root)
+        val scale = parseGlbScaleMetadata(root)
+        val boundsMm = parseEstimatedBoundsMm(root, unitsToMeters = scale.unitsToMeters)
+        val pivot = parseGlbPivotMetadata(root)
+        val materials = parseGlbMaterials(root)
         val sceneUnits = root.optJSONArray("scenes")?.optJSONObject(0)?.optJSONObject("extras")?.optString("units")
         val notes = mutableListOf<String>()
         sceneUnits?.let { unitString ->
@@ -122,6 +128,9 @@ class RingAssetLoader(
                 notes += "scene_units_meter"
             }
         }
+        if (scale.authoredWidthMm != null) notes += "authored_width_metadata"
+        if (pivot != null) notes += "pivot_metadata"
+        if (materials.isNotEmpty()) notes += "material_metadata"
 
         return GlbAssetSummary(
             modelAssetPath = modelPath,
@@ -132,11 +141,78 @@ class RingAssetLoader(
             materialCount = root.optJSONArray("materials")?.length() ?: 0,
             nodeCount = root.optJSONArray("nodes")?.length() ?: 0,
             estimatedBoundsMm = boundsMm,
+            pivot = pivot,
+            scale = scale,
+            materials = materials,
             notes = notes,
         )
     }
 
-    private fun parseEstimatedBoundsMm(root: JSONObject): GlbBoundsMm? {
+    private fun parseGlbScaleMetadata(root: JSONObject): GlbScaleMetadata {
+        val tryOn = root.tryOnExtras()
+        val sceneUnits = root.optJSONArray("scenes")?.optJSONObject(0)?.optJSONObject("extras")?.optString("units")
+        val scaleObject = tryOn?.optJSONObject("scale")
+        val units = scaleObject?.optString("units")?.takeIf { it.isNotBlank() } ?: sceneUnits
+        val unitsToMeters =
+            scaleObject?.optDouble("unitsToMeters", Double.NaN)
+                ?.takeIf { !it.isNaN() && it > 0.0 }
+                ?.toFloat()
+                ?: units.unitsToMeters()
+        return GlbScaleMetadata(
+            units = units,
+            unitsToMeters = unitsToMeters,
+            defaultScale = scaleObject?.optDouble("defaultScale", 1.0)?.toFloat()?.takeIf { it > 0f } ?: 1f,
+            authoredWidthMm = scaleObject?.optDouble("authoredWidthMm", Double.NaN)?.takeIf { !it.isNaN() && it > 0.0 }?.toFloat(),
+        )
+    }
+
+    private fun parseGlbPivotMetadata(root: JSONObject): GlbPivotMetadata? {
+        val pivot = root.tryOnExtras()?.opt("pivot") ?: return null
+        return when (pivot) {
+            is JSONObject ->
+                GlbPivotMetadata(
+                    x = pivot.optDouble("x", 0.0).toFloat(),
+                    y = pivot.optDouble("y", 0.0).toFloat(),
+                    z = pivot.optDouble("z", 0.0).toFloat(),
+                    units = pivot.optString("units", "model"),
+                )
+            is org.json.JSONArray ->
+                if (pivot.length() >= 3) {
+                    GlbPivotMetadata(
+                        x = pivot.optDouble(0, 0.0).toFloat(),
+                        y = pivot.optDouble(1, 0.0).toFloat(),
+                        z = pivot.optDouble(2, 0.0).toFloat(),
+                    )
+                } else {
+                    null
+                }
+            else -> null
+        }
+    }
+
+    private fun parseGlbMaterials(root: JSONObject): List<GlbMaterialMetadata> {
+        val materials = root.optJSONArray("materials") ?: return emptyList()
+        return List(materials.length()) { index ->
+            val material = materials.optJSONObject(index) ?: JSONObject()
+            val pbr = material.optJSONObject("pbrMetallicRoughness")
+            GlbMaterialMetadata(
+                name = material.optString("name").takeIf { it.isNotBlank() },
+                baseColorFactor =
+                    pbr?.optJSONArray("baseColorFactor")?.let { array ->
+                        List(array.length()) { component -> array.optDouble(component, 0.0).toFloat() }
+                    }.orEmpty(),
+                metallicFactor = pbr?.optDouble("metallicFactor", Double.NaN)?.takeIf { !it.isNaN() }?.toFloat(),
+                roughnessFactor = pbr?.optDouble("roughnessFactor", Double.NaN)?.takeIf { !it.isNaN() }?.toFloat(),
+                alphaMode = material.optString("alphaMode").takeIf { it.isNotBlank() },
+                doubleSided = material.optBoolean("doubleSided", false),
+            )
+        }
+    }
+
+    private fun parseEstimatedBoundsMm(
+        root: JSONObject,
+        unitsToMeters: Float,
+    ): GlbBoundsMm? {
         val meshes = root.optJSONArray("meshes") ?: return null
         val accessors = root.optJSONArray("accessors") ?: return null
 
@@ -179,12 +255,26 @@ class RingAssetLoader(
         }
 
         if (!found) return null
+        val unitsToMm = unitsToMeters * METERS_TO_MM
         return GlbBoundsMm(
-            x = (maxX - minX).coerceAtLeast(0f) * METERS_TO_MM,
-            y = (maxY - minY).coerceAtLeast(0f) * METERS_TO_MM,
-            z = (maxZ - minZ).coerceAtLeast(0f) * METERS_TO_MM,
+            x = (maxX - minX).coerceAtLeast(0f) * unitsToMm,
+            y = (maxY - minY).coerceAtLeast(0f) * unitsToMm,
+            z = (maxZ - minZ).coerceAtLeast(0f) * unitsToMm,
         )
     }
+
+    private fun JSONObject.tryOnExtras(): JSONObject? =
+        optJSONObject("extras")?.optJSONObject("tryOn")
+            ?: optJSONArray("scenes")?.optJSONObject(0)?.optJSONObject("extras")?.optJSONObject("tryOn")
+
+    private fun String?.unitsToMeters(): Float =
+        when {
+            this == null -> 1f
+            contains("millimeter", ignoreCase = true) || equals("mm", ignoreCase = true) -> 0.001f
+            contains("centimeter", ignoreCase = true) || equals("cm", ignoreCase = true) -> 0.01f
+            contains("meter", ignoreCase = true) || equals("m", ignoreCase = true) -> 1f
+            else -> 1f
+        }
 
     private companion object {
         const val GLB_HEADER_BYTES = 12

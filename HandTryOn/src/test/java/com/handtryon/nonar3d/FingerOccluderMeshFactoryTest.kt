@@ -55,6 +55,26 @@ class FingerOccluderMeshFactoryTest {
         assertThat(narrow.indices.max()).isLessThan(narrow.vertices.size)
     }
 
+    @Test
+    fun create_fromFingerOccluderState_usesStateDepth() {
+        val factory = FingerOccluderMeshFactory(sideCount = 12)
+        val near =
+            factory.create(
+                state = occluderState(radiusPx = 40f, depthMeters = 0.22f),
+                frameWidth = 1080,
+                frameHeight = 1920,
+            )
+        val far =
+            factory.create(
+                state = occluderState(radiusPx = 40f, depthMeters = 0.62f),
+                frameWidth = 1080,
+                frameHeight = 1920,
+            )
+
+        assertThat(near.vertices.first().position.z).isWithin(0.001f).of(-0.22f)
+        assertThat(far.vertices.first().position.z).isWithin(0.001f).of(-0.62f)
+    }
+
     private fun pose(fingerWidthPx: Float): RingFingerPose3D =
         RingFingerPose3D(
             centerPx = NonAr3dPoint2(540f, 690f),
@@ -70,12 +90,16 @@ class FingerOccluderMeshFactoryTest {
             confidence = 0.8f,
         )
 
-    private fun occluderState(radiusPx: Float): FingerOccluderState =
+    private fun occluderState(
+        radiusPx: Float,
+        depthMeters: Float = 0.42f,
+    ): FingerOccluderState =
         FingerOccluderState(
             startPx = TryOnPoint2(540f, 650f),
             endPx = TryOnPoint2(540f, 820f),
             radiusPx = radiusPx,
             normalHintPx = TryOnVec2(1f, 0f),
+            depthMeters = depthMeters,
             confidence = 0.8f,
         )
 }

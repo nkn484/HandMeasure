@@ -44,6 +44,7 @@ class FingerOccluderMeshFactory(
             startPx = pose.occluderStartPx,
             endPx = pose.occluderEndPx,
             radiusPx = pose.fingerWidthPx * 0.5f,
+            depthMeters = defaultDepthMeters,
             frameWidth = frameWidth,
             frameHeight = frameHeight,
         )
@@ -57,6 +58,7 @@ class FingerOccluderMeshFactory(
             startPx = NonAr3dPoint2(state.startPx.x, state.startPx.y),
             endPx = NonAr3dPoint2(state.endPx.x, state.endPx.y),
             radiusPx = state.radiusPx,
+            depthMeters = state.depthMeters,
             frameWidth = frameWidth,
             frameHeight = frameHeight,
         )
@@ -65,13 +67,14 @@ class FingerOccluderMeshFactory(
         startPx: NonAr3dPoint2,
         endPx: NonAr3dPoint2,
         radiusPx: Float,
+        depthMeters: Float,
         frameWidth: Int,
         frameHeight: Int,
     ): FingerOccluderMesh {
         val safeWidth = frameWidth.coerceAtLeast(1).toFloat()
         val safeHeight = frameHeight.coerceAtLeast(1).toFloat()
-        val start = project(startPx, safeWidth, safeHeight)
-        val end = project(endPx, safeWidth, safeHeight)
+        val start = project(startPx, safeWidth, safeHeight, depthMeters)
+        val end = project(endPx, safeWidth, safeHeight, depthMeters)
         val axis = NonAr3dVec3(end.x - start.x, end.y - start.y, end.z - start.z)
         val length = sqrt(axis.x * axis.x + axis.y * axis.y + axis.z * axis.z).coerceAtLeast(1e-4f)
         val tangent = axis.normalized()
@@ -133,13 +136,14 @@ class FingerOccluderMeshFactory(
         point: NonAr3dPoint2,
         frameWidth: Float,
         frameHeight: Float,
+        depthMeters: Float,
     ): NonAr3dVec3 {
         val normalizedX = (point.x / frameWidth - 0.5f).coerceIn(-0.5f, 0.5f)
         val normalizedY = (point.y / frameHeight - 0.5f).coerceIn(-0.5f, 0.5f)
         return NonAr3dVec3(
             x = normalizedX * viewportWidthAtDepthMeters,
             y = -normalizedY * viewportWidthAtDepthMeters * (frameHeight / frameWidth),
-            z = -defaultDepthMeters,
+            z = -depthMeters.coerceAtLeast(0.01f),
         )
     }
 

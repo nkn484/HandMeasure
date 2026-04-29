@@ -68,6 +68,7 @@ import com.handtryon.domain.TryOnTrackingState
 import com.handtryon.domain.TryOnUpdateAction
 import com.handtryon.realtime.TryOnRealtimeAnalyzer
 import com.handtryon.render.StableRingOverlayRenderer
+import com.handtryon.render3d.TryOnRenderState3DFactory
 import com.handtryon.tracking.FrameSource
 import com.handtryon.tracking.Handedness
 import com.handtryon.tracking.TargetFinger
@@ -104,6 +105,7 @@ fun TryOnDemoScreen(
     val sessionResolver = remember { TryOnSessionResolver() }
     val previewRenderer = remember { StableRingOverlayRenderer() }
     val exportRenderer = remember { StableRingOverlayRenderer() }
+    val renderState3DFactory = remember { TryOnRenderState3DFactory() }
     val handPoseProvider = remember { MutableHandPoseProvider() }
     val measurementProvider = remember { MutableMeasurementProvider() }
     val arFrameExecutor = remember { Executors.newSingleThreadExecutor() }
@@ -347,6 +349,21 @@ fun TryOnDemoScreen(
     val currentSession = session
     val frameWidth = latestFrame?.width ?: 0
     val frameHeight = latestFrame?.height ?: 0
+    val renderFrameWidth = frameWidth.takeIf { it > 0 } ?: DEMO_FALLBACK_FRAME_WIDTH
+    val renderFrameHeight = frameHeight.takeIf { it > 0 } ?: DEMO_FALLBACK_FRAME_HEIGHT
+    val currentRenderState3D =
+        remember(latestTrackedHandFrame, currentSession, glbSummary, frameWidth, frameHeight) {
+            renderState3DFactory.create(
+                trackedHandFrame = latestTrackedHandFrame,
+                measurement = measurementProvider.latestMeasurement(),
+                glbSummary = glbSummary,
+                frameWidth = renderFrameWidth,
+                frameHeight = renderFrameHeight,
+                qualityScore = currentSession?.quality?.qualityScore ?: 0.62f,
+                trackingState = currentSession?.quality?.trackingState ?: TryOnTrackingState.Searching,
+                updateAction = currentSession?.quality?.updateAction ?: TryOnUpdateAction.Hide,
+            )
+        }
     Box(
         modifier =
             modifier
@@ -356,18 +373,16 @@ fun TryOnDemoScreen(
         if (isArPreviewActive) {
             ArTryOnScene(
                 modelAssetPath = activeAsset.modelAssetPath,
+                renderState3D = currentRenderState3D,
+                frameWidth = renderFrameWidth,
+                frameHeight = renderFrameHeight,
                 glbSummary = glbSummary,
-                placement = currentSession?.placement,
-                frameWidth = frameWidth.takeIf { it > 0 } ?: DEMO_FALLBACK_FRAME_WIDTH,
-                frameHeight = frameHeight.takeIf { it > 0 } ?: DEMO_FALLBACK_FRAME_HEIGHT,
-                qualityScore = currentSession?.quality?.qualityScore ?: 0.62f,
-                trackingState = currentSession?.quality?.trackingState ?: TryOnTrackingState.Searching,
-                updateAction = currentSession?.quality?.updateAction ?: TryOnUpdateAction.Update,
-                trackedHandFrame = latestTrackedHandFrame,
-                measurement = measurementProvider.latestMeasurement(),
                 debugFingerOccluderVisible = debugFingerOccluderVisible,
                 onRendererError = { throwable ->
                     rendererError = "ARCore 3D: ${throwable.message ?: throwable::class.java.simpleName}"
+                },
+                onTelemetryUpdated = { metrics ->
+                    runtimeMetrics = metrics
                 },
                 onCameraFrame = { cameraFrame ->
                     val bitmap = cameraFrame.bitmap
@@ -546,7 +561,7 @@ fun TryOnDemoScreen(
                 style = MaterialTheme.typography.titleMedium,
             )
             Text(
-                text = runtimeMetrics.toRuntimeText(),
+                text = runtimeMetrics.toRuntimeTelemetryText(),
                 color = Color(0xFFE0E0E0),
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -764,6 +779,19 @@ private class MutableMeasurementProvider : OptionalMeasurementProvider {
     var snapshot: MeasurementSnapshot? = null
 
     override fun latestMeasurement(): MeasurementSnapshot? = snapshot
+}
+
+private fun RuntimeMetrics?.toRuntimeTelemetryText(): String {
+    val metrics = this ?: return "Realtime: waiting..."
+    val updateHz =
+        if (metrics.avgUpdateIntervalMs <= 0.0) {
+            0
+        } else {
+            (1000.0 / metrics.avgUpdateIntervalMs).roundToInt()
+        }
+    val renderHz = metrics.renderStateUpdateHz.roundToInt()
+    val rendererError = metrics.rendererErrorStage?.let { stage -> ", rendererError=$stage" }.orEmpty()
+    return "Realtime detector=${"%.1f".format(metrics.detectorLatencyMs)} ms, update=${updateHz} Hz, renderState=${renderHz} Hz, nodeRecreate=${metrics.nodeRecreateCount}$rendererError, memory=${metrics.approxMemoryDeltaKb} KB"
 }
 
 private fun RuntimeMetrics?.toRuntimeText(): String {

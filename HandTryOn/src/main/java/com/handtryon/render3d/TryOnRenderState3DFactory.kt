@@ -1,13 +1,14 @@
 package com.handtryon.render3d
 
-import com.handtryon.coreengine.RingFitSolver
-import com.handtryon.coreengine.RingFingerPoseSolver
 import com.handtryon.coreengine.RingTryOnRenderStateResolver
+import com.handtryon.coreengine.fit.RingFitSolver
 import com.handtryon.coreengine.model.TryOnInputQuality as CoreInputQuality
 import com.handtryon.coreengine.model.TryOnMeasurementSnapshot as CoreMeasurementSnapshot
 import com.handtryon.coreengine.model.TryOnRenderState3D
 import com.handtryon.coreengine.model.TryOnTrackingState as CoreTrackingState
 import com.handtryon.coreengine.model.TryOnUpdateAction as CoreUpdateAction
+import com.handtryon.coreengine.model.TryOnVec3
+import com.handtryon.coreengine.pose.RingFingerPoseSolver
 import com.handtryon.domain.GlbAssetSummary
 import com.handtryon.domain.MeasurementSnapshot
 import com.handtryon.domain.TryOnTrackingState
@@ -15,7 +16,6 @@ import com.handtryon.domain.TryOnUpdateAction
 import com.handtryon.tracking.TrackedHandFrame
 import com.handtryon.tracking.TrackedHandFrameMapper
 import com.handtryon.tracking.TrackingFrameQualityPolicy
-import kotlin.math.max
 
 class TryOnRenderState3DFactory(
     private val poseSolver: RingFingerPoseSolver = RingFingerPoseSolver(),
@@ -41,9 +41,9 @@ class TryOnRenderState3DFactory(
             fitSolver.solve(
                 fingerPose = corePose,
                 measurement = coreMeasurement,
-                modelWidthMm = glbSummary?.estimatedBoundsMm?.let { max(it.x, it.y) },
+                modelWidthMm = glbSummary?.effectiveModelWidthMm,
             )
-        return renderStateResolver.resolve(
+        val renderState = renderStateResolver.resolve(
             fingerPose = corePose,
             fitState = fit,
             quality =
@@ -59,6 +59,24 @@ class TryOnRenderState3DFactory(
                 ),
             frameWidth = frameWidth,
             frameHeight = frameHeight,
+        )
+        return renderState.withAssetScale(glbSummary)
+    }
+
+    private fun TryOnRenderState3D.withAssetScale(glbSummary: GlbAssetSummary?): TryOnRenderState3D {
+        val multiplier = glbSummary?.scale?.defaultScale?.takeIf { it > 0f } ?: 1f
+        if (multiplier == 1f) return this
+        val baseScale = ringTransform.scale
+        return copy(
+            ringTransform =
+                ringTransform.copy(
+                    scale =
+                        TryOnVec3(
+                            x = baseScale.x * multiplier,
+                            y = baseScale.y * multiplier,
+                            z = baseScale.z * multiplier,
+                        ),
+                ),
         )
     }
 

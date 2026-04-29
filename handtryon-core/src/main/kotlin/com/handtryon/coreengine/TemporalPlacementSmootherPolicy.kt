@@ -13,9 +13,23 @@ data class TryOnSmoothingContext(
     val updateAction: TryOnUpdateAction = TryOnUpdateAction.Update,
 )
 
+data class TemporalPlacementSmootherConfig(
+    val minAlpha: Float = 0.16f,
+    val maxAlpha: Float = 0.5f,
+    val holdSmallMovementRatio: Float = 0.12f,
+    val fastMovementRatio: Float = 0.45f,
+    val lockedHighQualityThreshold: Float = 0.72f,
+    val lowQualityThreshold: Float = 0.4f,
+    val minCenterAlpha: Float = 0.12f,
+    val maxCenterAlpha: Float = 0.88f,
+    val minRotationAlpha: Float = 0.1f,
+    val maxRotationAlpha: Float = 0.88f,
+    val minScaleAlpha: Float = 0.08f,
+    val maxScaleAlpha: Float = 0.84f,
+)
+
 class TemporalPlacementSmootherPolicy(
-    private val minAlpha: Float = 0.16f,
-    private val maxAlpha: Float = 0.5f,
+    private val config: TemporalPlacementSmootherConfig = TemporalPlacementSmootherConfig(),
 ) {
     fun smooth(
         raw: TryOnPlacement,
@@ -67,7 +81,7 @@ class TemporalPlacementSmootherPolicy(
     private fun computeBaseAlpha(deltaMs: Long): Float {
         val clamped = max(16L, deltaMs).coerceAtMost(220L)
         val normalized = (clamped - 16f) / (220f - 16f)
-        return minAlpha + (maxAlpha - minAlpha) * normalized
+        return config.minAlpha + (config.maxAlpha - config.minAlpha) * normalized
     }
 
     private fun computeMovementRatio(
@@ -90,19 +104,22 @@ class TemporalPlacementSmootherPolicy(
         context: TryOnSmoothingContext,
     ): Float {
         var alpha = baseAlpha
-        if (movementRatio < 0.12f && quality > 0.72f && context.trackingState == TryOnTrackingState.Locked) {
+        if (movementRatio < config.holdSmallMovementRatio &&
+            quality > config.lockedHighQualityThreshold &&
+            context.trackingState == TryOnTrackingState.Locked
+        ) {
             alpha *= 0.62f
         }
-        if (movementRatio > 0.45f) {
+        if (movementRatio > config.fastMovementRatio) {
             alpha *= 1.5f
         }
         if (context.trackingState == TryOnTrackingState.Recovering || context.updateAction == TryOnUpdateAction.Recover) {
             alpha = max(alpha, 0.68f)
         }
-        if (quality < 0.4f && context.updateAction == TryOnUpdateAction.Update) {
+        if (quality < config.lowQualityThreshold && context.updateAction == TryOnUpdateAction.Update) {
             alpha *= 1.2f
         }
-        return alpha.coerceIn(0.12f, 0.88f)
+        return alpha.coerceIn(config.minCenterAlpha, config.maxCenterAlpha)
     }
 
     private fun computeRotationAlpha(
@@ -115,7 +132,7 @@ class TemporalPlacementSmootherPolicy(
             } else {
                 centerAlpha * 0.84f
             }
-        return alpha.coerceIn(0.1f, 0.88f)
+        return alpha.coerceIn(config.minRotationAlpha, config.maxRotationAlpha)
     }
 
     private fun computeScaleAlpha(
@@ -128,7 +145,7 @@ class TemporalPlacementSmootherPolicy(
             } else {
                 centerAlpha * 0.72f
             }
-        return alpha.coerceIn(0.08f, 0.84f)
+        return alpha.coerceIn(config.minScaleAlpha, config.maxScaleAlpha)
     }
 
     private fun normalizeRotationDelta(delta: Float): Float {

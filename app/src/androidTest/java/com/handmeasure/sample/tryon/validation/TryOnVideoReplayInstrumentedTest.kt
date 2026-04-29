@@ -4,6 +4,9 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.media.MediaMetadataRetriever
 import android.os.Build
@@ -20,9 +23,15 @@ import com.handtryon.domain.TryOnUpdateAction
 import com.handtryon.render3d.TryOnRenderState3DFactory
 import com.handtryon.tracking.FrameSource
 import com.handtryon.tracking.TrackedHandFrameMapper
+import com.handtryon.coreengine.validation.TryOnImageAugmentation
+import com.handtryon.coreengine.validation.TryOnTemporalQualityModel
+import com.handtryon.coreengine.validation.TryOnTemporalSample
+import com.handtryon.coreengine.model.TryOnPlacement
 import java.io.File
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.sin
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Test
@@ -77,15 +86,29 @@ class TryOnVideoReplayInstrumentedTest {
             for (index in 0 until frames.length()) {
                 val expectedFrame = frames.getJSONObject(index)
                 val bitmap = retriever.frameForAnnotation(expectedFrame)
-                frameRows.put(
-                    runFrame(
-                        expectedFrame = expectedFrame,
-                        bitmap = bitmap,
-                        handEngine = handEngine,
-                        renderer = renderer,
-                        screenshotDir = screenshotDir,
-                    ),
-                )
+                for (augmentation in AUGMENTATIONS) {
+                    val augmentedBitmap = bitmap?.augment(augmentation)
+                    val augmentedExpected =
+                        if (bitmap == null) {
+                            expectedFrame
+                        } else {
+                            expectedFrame.augmentGeometry(
+                                augmentation = augmentation,
+                                frameWidth = bitmap.width,
+                                frameHeight = bitmap.height,
+                            )
+                        }
+                    frameRows.put(
+                        runFrame(
+                            expectedFrame = augmentedExpected,
+                            bitmap = augmentedBitmap,
+                            handEngine = handEngine,
+                            renderer = renderer,
+                            screenshotDir = screenshotDir,
+                        ),
+                    )
+                    augmentedBitmap?.recycle()
+                }
                 bitmap?.recycle()
             }
         } finally {
@@ -101,10 +124,13 @@ class TryOnVideoReplayInstrumentedTest {
                 .put("media", media)
                 .put("screenshotDir", screenshotDir.absolutePath)
                 .put("summary", summary)
+                .put("augmentationSummary", summarizeAugmentations(frameRows))
+                .put("temporalQuality", temporalQuality(frameRows))
+                .put("baselineRegression", baselineRegression(annotationAsset, summary))
                 .put("frames", frameRows)
         reportFile.writeText(report.toString(2), Charsets.UTF_8)
 
-        assertThat(summary.getInt("totalFrames")).isEqualTo(annotation.getJSONArray("frames").length())
+        assertThat(summary.getInt("totalFrames")).isEqualTo(annotation.getJSONArray("frames").length() * AUGMENTATIONS.size)
         assertThat(summary.getInt("unreadableFrames")).isEqualTo(0)
         assertThat(reportFile.exists()).isTrue()
     }
@@ -146,7 +172,7 @@ class TryOnVideoReplayInstrumentedTest {
                 source = bitmap,
                 expectedFrame = expectedFrame,
                 predicted = null,
-                output = File(screenshotDir, "frame_${expectedFrame.getInt("frameIndex").toString().padStart(6, '0')}.png"),
+                output = File(screenshotDir, screenshotName(expectedFrame)),
             )
             return baseRow(expectedFrame, visibleFinger)
                 .put("status", "no_render_state")
@@ -164,13 +190,16 @@ class TryOnVideoReplayInstrumentedTest {
             )
         val widthError = abs(renderState.fitState.targetWidthPx - expected.getDouble("widthPx"))
         val rotationError = normalizeAxisDegrees(renderState.fingerPose.rotationDegrees - expected.getDouble("rotationDeg"))
+        val centerErrorRatio = centerError / renderState.fitState.targetWidthPx.coerceAtLeast(1f)
+        val widthErrorRatio = widthError / expected.getDouble("widthPx").coerceAtLeast(1.0)
         val pass =
             if (!visibleFinger) {
                 false
             } else {
                 centerError <= CENTER_THRESHOLD_PX &&
                     widthError <= WIDTH_THRESHOLD_PX &&
-                    rotationError <= ROTATION_THRESHOLD_DEGREES
+                    rotationError <= ROTATION_THRESHOLD_DEGREES &&
+                    renderState.visualQa?.passesBasicGate != false
             }
 
         saveReplayOverlay(
@@ -182,14 +211,16 @@ class TryOnVideoReplayInstrumentedTest {
                     centerY = renderState.fingerPose.centerPx.y,
                     widthPx = renderState.fitState.targetWidthPx,
                 ),
-            output = File(screenshotDir, "frame_${expectedFrame.getInt("frameIndex").toString().padStart(6, '0')}.png"),
+            output = File(screenshotDir, screenshotName(expectedFrame)),
         )
 
         return baseRow(expectedFrame, visibleFinger)
             .put("status", "measured")
             .put("pass", pass)
             .put("centerErrorPx", centerError)
+            .put("centerErrorRatio", centerErrorRatio)
             .put("widthErrorPx", widthError)
+            .put("widthErrorRatio", widthErrorRatio)
             .put("rotationErrorDeg", rotationError)
             .put("confidence", renderState.fingerPose.confidence.toDouble())
             .put("predictedRingFingerZone", JSONObject()
@@ -200,9 +231,46 @@ class TryOnVideoReplayInstrumentedTest {
                 .put("fingerWidthPx", renderState.fingerPose.fingerWidthPx.toDouble())
                 .put("normalHintX", renderState.fingerPose.normalHintPx.x.toDouble())
                 .put("normalHintY", renderState.fingerPose.normalHintPx.y.toDouble()))
+            .put("poseDiagnostics", renderState.fingerPose.diagnostics?.toJson() ?: JSONObject())
+            .put("fitDiagnostics", renderState.fitState.diagnostics?.toJson() ?: JSONObject())
+            .put("visualQa", renderState.visualQa?.toJson() ?: JSONObject())
+            .put("renderPasses", JSONArray(renderState.renderPasses.map { it.name }))
             .put("debugLandmarks", detection.debugRingFingerLandmarks())
             .put("reason", if (pass) "" else if (!visibleFinger) "Unexpected render state for hidden ring finger" else "Metric exceeded threshold")
     }
+
+    private fun com.handtryon.coreengine.model.RingFingerPoseDiagnostics.toJson(): JSONObject =
+        JSONObject()
+            .put("extensionRatio", extensionRatio.toDouble())
+            .put("bendCosine", bendCosine.toDouble())
+            .put("distalToProximalRatio", distalToProximalRatio.toDouble())
+            .put("forwardExtensionCosine", forwardExtensionCosine.toDouble())
+            .put("centerOnMcpToPip", centerOnMcpToPip.toDouble())
+            .put("lateralOffsetPx", lateralOffsetPx.toDouble())
+            .put("axisLengthPx", axisLengthPx.toDouble())
+            .put("rawRotationDegrees", rawRotationDegrees.toDouble())
+            .put("rotationCorrectionDegrees", rotationCorrectionDegrees.toDouble())
+            .put("confidence", confidence.toDouble())
+            .put("rejectReason", rejectReason?.name ?: "")
+
+    private fun com.handtryon.coreengine.model.RingFitDiagnostics.toJson(): JSONObject =
+        JSONObject()
+            .put("visualRingToFingerWidthRatio", visualRingToFingerWidthRatio.toDouble())
+            .put("measuredWidthRatio", measuredWidthRatio?.toDouble() ?: JSONObject.NULL)
+            .put("unclampedTargetWidthPx", unclampedTargetWidthPx.toDouble())
+            .put("unclampedDepthMeters", unclampedDepthMeters.toDouble())
+            .put("unclampedModelScale", unclampedModelScale.toDouble())
+            .put("source", source.name)
+
+    private fun com.handtryon.coreengine.model.TryOnVisualQaSnapshot.toJson(): JSONObject =
+        JSONObject()
+            .put("attachmentRatio", attachmentRatio.toDouble())
+            .put("occluderRadiusToRingWidthRatio", occluderRadiusToRingWidthRatio.toDouble())
+            .put("occluderDepthMeters", occluderDepthMeters.toDouble())
+            .put("ringDepthMeters", ringDepthMeters.toDouble())
+            .put("renderScale", renderScale.toDouble())
+            .put("passesBasicGate", passesBasicGate)
+            .put("warnings", JSONArray(warnings))
 
     private fun HandDetection.debugRingFingerLandmarks(): JSONObject {
         if (imageLandmarks.size <= RING_DIP_INDEX) return JSONObject()
@@ -274,6 +342,88 @@ class TryOnVideoReplayInstrumentedTest {
         bitmap.recycle()
     }
 
+    private fun screenshotName(expectedFrame: JSONObject): String =
+        "frame_${expectedFrame.getInt("frameIndex").toString().padStart(6, '0')}_${expectedFrame.optString("augmentationId", "identity")}.png"
+
+    private fun Bitmap.augment(augmentation: TryOnImageAugmentation): Bitmap {
+        val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(output)
+        val matrix =
+            Matrix().apply {
+                setRotate(augmentation.rotationDegrees, width * 0.5f, height * 0.5f)
+            }
+        val paint =
+            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+                colorFilter = augmentation.colorFilter()
+            }
+        canvas.drawColor(Color.BLACK)
+        canvas.drawBitmap(this, matrix, paint)
+        return output
+    }
+
+    private fun TryOnImageAugmentation.colorFilter(): ColorMatrixColorFilter? {
+        if (brightnessDelta == 0f && contrastScale == 1f) return null
+        val brightness = brightnessDelta * 255f
+        val matrix =
+            ColorMatrix(
+                floatArrayOf(
+                    contrastScale, 0f, 0f, 0f, brightness,
+                    0f, contrastScale, 0f, 0f, brightness,
+                    0f, 0f, contrastScale, 0f, brightness,
+                    0f, 0f, 0f, 1f, 0f,
+                ),
+            )
+        return ColorMatrixColorFilter(matrix)
+    }
+
+    private fun JSONObject.augmentGeometry(
+        augmentation: TryOnImageAugmentation,
+        frameWidth: Int,
+        frameHeight: Int,
+    ): JSONObject {
+        val copy = JSONObject(toString())
+        val zone = copy.getJSONObject("ringFingerZone")
+        val rotated = rotatePoint(
+            x = zone.getDouble("centerX"),
+            y = zone.getDouble("centerY"),
+            degrees = augmentation.rotationDegrees.toDouble(),
+            frameWidth = frameWidth.toDouble(),
+            frameHeight = frameHeight.toDouble(),
+        )
+        zone
+            .put("centerX", rotated.first)
+            .put("centerY", rotated.second)
+            .put("rotationDeg", zone.getDouble("rotationDeg") + augmentation.rotationDegrees)
+        copy
+            .put("augmentationId", augmentation.id)
+            .put(
+                "augmentation",
+                JSONObject()
+                    .put("rotationDegrees", augmentation.rotationDegrees.toDouble())
+                    .put("brightnessDelta", augmentation.brightnessDelta.toDouble())
+                    .put("contrastScale", augmentation.contrastScale.toDouble()),
+            )
+        return copy
+    }
+
+    private fun rotatePoint(
+        x: Double,
+        y: Double,
+        degrees: Double,
+        frameWidth: Double,
+        frameHeight: Double,
+    ): Pair<Double, Double> {
+        val radians = Math.toRadians(degrees)
+        val cx = frameWidth * 0.5
+        val cy = frameHeight * 0.5
+        val dx = x - cx
+        val dy = y - cy
+        return Pair(
+            cx + dx * cos(radians) - dy * sin(radians),
+            cy + dx * sin(radians) + dy * cos(radians),
+        )
+    }
+
     private fun baseRow(
         expectedFrame: JSONObject,
         visibleFinger: Boolean,
@@ -282,6 +432,7 @@ class TryOnVideoReplayInstrumentedTest {
             .put("file", "video_fixture.mp4")
             .put("frameIndex", expectedFrame.getInt("frameIndex"))
             .put("timeSec", expectedFrame.getDouble("timeSec"))
+            .put("augmentationId", expectedFrame.optString("augmentationId", "identity"))
             .put("visibleFinger", visibleFinger)
             .put("declaredAnnotationQuality", expectedFrame.optString("annotationQuality"))
 
@@ -318,26 +469,218 @@ class TryOnVideoReplayInstrumentedTest {
         var measured = 0
         var passed = 0
         var falsePositiveHidden = 0
+        var maxCenterError = 0.0
+        var maxCenterErrorRatio = 0.0
+        var maxWidthError = 0.0
+        var maxRotationError = 0.0
+        var measuredCenterErrorSum = 0.0
+        var measuredAttachmentRatioSum = 0.0
+        var visualQaWarnings = 0
         for (index in 0 until rows.length()) {
             val row = rows.getJSONObject(index)
             if (row.getString("status") == "unreadable_frame") unreadable += 1
             if (row.getString("status") == "measured") measured += 1
             if (row.getBoolean("pass")) passed += 1
             if (!row.getBoolean("visibleFinger") && row.getString("status") == "measured") falsePositiveHidden += 1
+            if (row.getString("status") == "measured") {
+                val centerError = row.getDouble("centerErrorPx")
+                val centerErrorRatio = row.getDouble("centerErrorRatio")
+                val widthError = row.getDouble("widthErrorPx")
+                val rotationError = row.getDouble("rotationErrorDeg")
+                val visualQa = row.optJSONObject("visualQa")
+                maxCenterError = maxOf(maxCenterError, centerError)
+                maxCenterErrorRatio = maxOf(maxCenterErrorRatio, centerErrorRatio)
+                maxWidthError = maxOf(maxWidthError, widthError)
+                maxRotationError = maxOf(maxRotationError, rotationError)
+                measuredCenterErrorSum += centerError
+                measuredAttachmentRatioSum += visualQa?.optDouble("attachmentRatio", 0.0) ?: 0.0
+                if (visualQa?.optBoolean("passesBasicGate", true) == false) visualQaWarnings += 1
+            }
         }
+        val safeMeasured = measured.coerceAtLeast(1)
         return JSONObject()
             .put("totalFrames", rows.length())
             .put("unreadableFrames", unreadable)
             .put("measuredFrames", measured)
             .put("passedFrames", passed)
             .put("falsePositiveHiddenFrames", falsePositiveHidden)
+            .put("maxCenterErrorPx", maxCenterError)
+            .put("maxCenterErrorRatio", maxCenterErrorRatio)
+            .put("maxWidthErrorPx", maxWidthError)
+            .put("maxRotationErrorDeg", maxRotationError)
+            .put("avgCenterErrorPx", measuredCenterErrorSum / safeMeasured)
+            .put("avgVisualQaAttachmentRatio", measuredAttachmentRatioSum / safeMeasured)
+            .put("visualQaWarningFrames", visualQaWarnings)
     }
+
+    private fun summarizeAugmentations(rows: JSONArray): JSONArray {
+        val ids = mutableListOf<String>()
+        for (index in 0 until rows.length()) {
+            val id = rows.getJSONObject(index).optString("augmentationId", "identity")
+            if (!ids.contains(id)) ids += id
+        }
+        val summaries = JSONArray()
+        for (id in ids) {
+            var total = 0
+            var measured = 0
+            var passed = 0
+            var centerSum = 0.0
+            var maxCenterRatio = 0.0
+            for (index in 0 until rows.length()) {
+                val row = rows.getJSONObject(index)
+                if (row.optString("augmentationId", "identity") != id) continue
+                total += 1
+                if (row.getBoolean("pass")) passed += 1
+                if (row.getString("status") == "measured") {
+                    measured += 1
+                    centerSum += row.optDouble("centerErrorPx", 0.0)
+                    maxCenterRatio = maxOf(maxCenterRatio, row.optDouble("centerErrorRatio", 0.0))
+                }
+            }
+            summaries.put(
+                JSONObject()
+                    .put("augmentationId", id)
+                    .put("totalFrames", total)
+                    .put("measuredFrames", measured)
+                    .put("passedFrames", passed)
+                    .put("avgCenterErrorPx", centerSum / measured.coerceAtLeast(1))
+                    .put("maxCenterErrorRatio", maxCenterRatio),
+            )
+        }
+        return summaries
+    }
+
+    private fun temporalQuality(rows: JSONArray): JSONObject {
+        val samples = mutableListOf<TryOnTemporalSample>()
+        for (index in 0 until rows.length()) {
+            val row = rows.getJSONObject(index)
+            if (row.optString("augmentationId", "identity") != TryOnImageAugmentation.Identity.id) continue
+            val predicted = row.optJSONObject("predictedRingFingerZone")
+            val placement =
+                if (predicted != null && row.getString("status") == "measured") {
+                    TryOnPlacement(
+                        centerX = predicted.getDouble("centerX").toFloat(),
+                        centerY = predicted.getDouble("centerY").toFloat(),
+                        ringWidthPx = predicted.getDouble("widthPx").toFloat(),
+                        rotationDegrees = predicted.getDouble("rotationDeg").toFloat(),
+                    )
+                } else {
+                    null
+                }
+            samples +=
+                TryOnTemporalSample(
+                    timestampMs = (row.getDouble("timeSec") * 1000.0).toLong(),
+                    placement = placement,
+                    qualityScore = row.optDouble("confidence", 0.0).toFloat(),
+                    trackingState = TryOnTrackingState.Candidate.toCoreTrackingState(),
+                    updateAction = if (placement == null) TryOnUpdateAction.Hide.toCoreUpdateAction() else TryOnUpdateAction.Update.toCoreUpdateAction(),
+                )
+        }
+        val metrics = TryOnTemporalQualityModel().evaluate(samples)
+        return JSONObject()
+            .put("source", "sampled_identity_replay_frames")
+            .put("sampleCount", metrics.sampleCount)
+            .put("measuredSampleCount", metrics.measuredSampleCount)
+            .put("durationMs", metrics.durationMs)
+            .put("effectiveUpdateHz", metrics.effectiveUpdateHz.toDouble())
+            .put("avgCenterStepRatio", metrics.avgCenterStepRatio.toDouble())
+            .put("maxCenterStepRatio", metrics.maxCenterStepRatio.toDouble())
+            .put("avgScaleStepRatio", metrics.avgScaleStepRatio.toDouble())
+            .put("maxScaleStepRatio", metrics.maxScaleStepRatio.toDouble())
+            .put("avgRotationStepDeg", metrics.avgRotationStepDeg.toDouble())
+            .put("maxRotationStepDeg", metrics.maxRotationStepDeg.toDouble())
+            .put("hiddenFrames", metrics.hiddenFrames)
+            .put("frozenFrames", metrics.frozenFrames)
+            .put("lowQualityFrames", metrics.lowQualityFrames)
+            .put("stableEnough", metrics.stableEnough)
+            .put("warnings", JSONArray(metrics.warnings))
+    }
+
+    private fun baselineRegression(
+        annotationAsset: String,
+        summary: JSONObject,
+    ): JSONObject {
+        val baseline =
+            BASELINE_REGRESSION_BY_ASSET[annotationAsset]
+                ?: return JSONObject()
+                    .put("baselineName", BASELINE_NAME)
+                    .put("status", "missing_baseline")
+        val passedDelta = summary.getInt("passedFrames") - baseline.passedFrames
+        val passRateDelta = passRate(summary.getInt("passedFrames"), summary.getInt("totalFrames")) - baseline.passRate
+        val maxCenterRatioDelta = summary.getDouble("maxCenterErrorRatio") - baseline.maxCenterErrorRatio
+        val maxRotationDelta = summary.getDouble("maxRotationErrorDeg") - baseline.maxRotationErrorDeg
+        val hiddenFpDelta = summary.getInt("falsePositiveHiddenFrames") - baseline.falsePositiveHiddenFrames
+        val visualQaWarningDelta = summary.getInt("visualQaWarningFrames") - baseline.visualQaWarningFrames
+        val status =
+            when {
+                passedDelta < 0 || hiddenFpDelta > 0 || visualQaWarningDelta > 0 -> "regressed"
+                passedDelta > 0 || maxCenterRatioDelta < -0.02 -> "improved"
+                else -> "unchanged"
+            }
+        return JSONObject()
+            .put("baselineName", BASELINE_NAME)
+            .put("status", status)
+            .put("baseline", baseline.toJson())
+            .put(
+                "delta",
+                JSONObject()
+                    .put("passedFrames", passedDelta)
+                    .put("passRate", passRateDelta)
+                    .put("maxCenterErrorRatio", maxCenterRatioDelta)
+                    .put("maxRotationErrorDeg", maxRotationDelta)
+                    .put("falsePositiveHiddenFrames", hiddenFpDelta)
+                    .put("visualQaWarningFrames", visualQaWarningDelta),
+            )
+    }
+
+    private fun passRate(
+        passedFrames: Int,
+        totalFrames: Int,
+    ): Double = passedFrames.toDouble() / totalFrames.coerceAtLeast(1).toDouble()
+
+    private fun TryOnTrackingState.toCoreTrackingState(): com.handtryon.coreengine.model.TryOnTrackingState =
+        when (this) {
+            TryOnTrackingState.Searching -> com.handtryon.coreengine.model.TryOnTrackingState.Searching
+            TryOnTrackingState.Candidate -> com.handtryon.coreengine.model.TryOnTrackingState.Candidate
+            TryOnTrackingState.Locked -> com.handtryon.coreengine.model.TryOnTrackingState.Locked
+            TryOnTrackingState.Recovering -> com.handtryon.coreengine.model.TryOnTrackingState.Recovering
+        }
+
+    private fun TryOnUpdateAction.toCoreUpdateAction(): com.handtryon.coreengine.model.TryOnUpdateAction =
+        when (this) {
+            TryOnUpdateAction.Update -> com.handtryon.coreengine.model.TryOnUpdateAction.Update
+            TryOnUpdateAction.FreezeScaleRotation -> com.handtryon.coreengine.model.TryOnUpdateAction.FreezeScaleRotation
+            TryOnUpdateAction.HoldLastPlacement -> com.handtryon.coreengine.model.TryOnUpdateAction.HoldLastPlacement
+            TryOnUpdateAction.Recover -> com.handtryon.coreengine.model.TryOnUpdateAction.Recover
+            TryOnUpdateAction.Hide -> com.handtryon.coreengine.model.TryOnUpdateAction.Hide
+        }
 
     private data class PredictedZone(
         val centerX: Float,
         val centerY: Float,
         val widthPx: Float,
     )
+
+    private data class ReplayRegressionBaseline(
+        val totalFrames: Int,
+        val passedFrames: Int,
+        val falsePositiveHiddenFrames: Int,
+        val visualQaWarningFrames: Int,
+        val maxCenterErrorRatio: Double,
+        val maxRotationErrorDeg: Double,
+    ) {
+        val passRate: Double = passedFrames.toDouble() / totalFrames.coerceAtLeast(1).toDouble()
+
+        fun toJson(): JSONObject =
+            JSONObject()
+                .put("totalFrames", totalFrames)
+                .put("passedFrames", passedFrames)
+                .put("passRate", passRate)
+                .put("falsePositiveHiddenFrames", falsePositiveHiddenFrames)
+                .put("visualQaWarningFrames", visualQaWarningFrames)
+                .put("maxCenterErrorRatio", maxCenterErrorRatio)
+                .put("maxRotationErrorDeg", maxRotationErrorDeg)
+    }
 
     private fun normalizeDegrees(value: Double): Double {
         val normalized = (value + 180.0) % 360.0 - 180.0
@@ -353,6 +696,38 @@ class TryOnVideoReplayInstrumentedTest {
                 "video-fixture-2026-04-29.json",
                 "video-fixture2-2026-04-29.json",
                 "video-fixture3-2026-04-29.json",
+            )
+        val AUGMENTATIONS = TryOnImageAugmentation.DefaultRobustnessSet
+        const val BASELINE_NAME = "android_augmented_rotation_tuned_v2"
+        val BASELINE_REGRESSION_BY_ASSET =
+            mapOf(
+                "video-fixture-2026-04-29.json" to
+                    ReplayRegressionBaseline(
+                        totalFrames = 42,
+                        passedFrames = 39,
+                        falsePositiveHiddenFrames = 0,
+                        visualQaWarningFrames = 0,
+                        maxCenterErrorRatio = 1.0078,
+                        maxRotationErrorDeg = 14.615,
+                    ),
+                "video-fixture2-2026-04-29.json" to
+                    ReplayRegressionBaseline(
+                        totalFrames = 42,
+                        passedFrames = 38,
+                        falsePositiveHiddenFrames = 0,
+                        visualQaWarningFrames = 0,
+                        maxCenterErrorRatio = 0.8704,
+                        maxRotationErrorDeg = 9.828,
+                    ),
+                "video-fixture3-2026-04-29.json" to
+                    ReplayRegressionBaseline(
+                        totalFrames = 77,
+                        passedFrames = 77,
+                        falsePositiveHiddenFrames = 0,
+                        visualQaWarningFrames = 0,
+                        maxCenterErrorRatio = 0.1195,
+                        maxRotationErrorDeg = 5.105,
+                    ),
             )
         const val MICROSECONDS_PER_SECOND = 1_000_000.0
         const val CENTER_THRESHOLD_PX = 24.0

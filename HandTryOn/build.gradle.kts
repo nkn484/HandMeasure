@@ -34,7 +34,7 @@ android {
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.10.01")
 
-    implementation(project(":handtryon-core"))
+    api(project(":handtryon-core"))
 
     implementation(composeBom)
     implementation("androidx.core:core-ktx:1.15.0")

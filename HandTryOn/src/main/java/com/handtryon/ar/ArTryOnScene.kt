@@ -1,6 +1,7 @@
 package com.handtryon.ar
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -12,19 +13,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.google.ar.core.Config
+import com.handtryon.coreengine.model.TryOnRenderPass
+import com.handtryon.coreengine.model.TryOnRenderState3D
 import com.handtryon.domain.GlbAssetSummary
-import com.handtryon.domain.MeasurementSnapshot
-import com.handtryon.domain.RingPlacement
-import com.handtryon.domain.TryOnTrackingState
-import com.handtryon.domain.TryOnUpdateAction
 import com.handtryon.nonar3d.DepthOnlyMaterialFactory
 import com.handtryon.nonar3d.FingerOccluderMesh
 import com.handtryon.nonar3d.FingerOccluderMeshFactory
 import com.handtryon.nonar3d.FingerOccluderNodeFactory
-import com.handtryon.nonar3d.RingFingerPose3D
-import com.handtryon.nonar3d.RingFingerPoseSolver
-import com.handtryon.render3d.TryOnRenderState3DFactory
-import com.handtryon.tracking.TrackedHandFrame
+import com.handtryon.validation.RuntimeMetrics
+import com.handtryon.validation.RuntimeMetricsTracker
 import dev.romainguy.kotlin.math.Float3
 import io.github.sceneview.ar.ARScene
 import io.github.sceneview.ar.rememberARCameraStream
@@ -39,19 +36,15 @@ import io.github.sceneview.rememberNodes
 @Composable
 fun ArTryOnScene(
     modelAssetPath: String?,
-    glbSummary: GlbAssetSummary?,
-    placement: RingPlacement?,
+    renderState3D: TryOnRenderState3D?,
     frameWidth: Int,
     frameHeight: Int,
-    qualityScore: Float,
-    trackingState: TryOnTrackingState,
-    updateAction: TryOnUpdateAction,
-    trackedHandFrame: TrackedHandFrame? = null,
-    measurement: MeasurementSnapshot? = null,
+    glbSummary: GlbAssetSummary? = null,
     debugFingerOccluderVisible: Boolean = false,
     modifier: Modifier = Modifier,
     onCameraFrame: (ArCameraBitmapFrame) -> Unit = { it.bitmap.recycle() },
     onRendererError: (Throwable) -> Unit = {},
+    onTelemetryUpdated: (RuntimeMetrics) -> Unit = {},
 ) {
     val engine = rememberEngine()
     val context = LocalContext.current
@@ -59,20 +52,15 @@ fun ArTryOnScene(
     val materialLoader = rememberMaterialLoader(engine)
     val cameraStream = rememberARCameraStream(materialLoader)
     val childNodes = rememberNodes()
-    val placementMapper = remember { ArRingPlacementMapper() }
     val frameSampler = remember { ArCoreCameraFrameSampler() }
-    val fingerPoseSolver = remember { RingFingerPoseSolver() }
-    val renderStateFactory = remember { TryOnRenderState3DFactory() }
+    val metrics = remember { RuntimeMetricsTracker() }
     val occluderMeshFactory = remember { FingerOccluderMeshFactory() }
     val depthOnlyMaterialFactory = remember { DepthOnlyMaterialFactory() }
     val occluderNodeFactory = remember { FingerOccluderNodeFactory() }
     var ringNode by remember { mutableStateOf<ModelNode?>(null) }
     var occluderNode by remember { mutableStateOf<GeometryNode?>(null) }
-    var lastRenderablePlacement by remember { mutableStateOf<RingPlacement?>(null) }
-    var ringFingerPose by remember { mutableStateOf<RingFingerPose3D?>(null) }
     var fingerOccluderMesh by remember { mutableStateOf<FingerOccluderMesh?>(null) }
     var occluderDebugVisible by remember { mutableStateOf<Boolean?>(null) }
-    var renderState3D by remember { mutableStateOf<com.handtryon.coreengine.model.TryOnRenderState3D?>(null) }
 
     LaunchedEffect(cameraStream) {
         cameraStream.isDepthOcclusionEnabled = true
@@ -82,14 +70,12 @@ fun ArTryOnScene(
         onDispose {
             ringNode = null
             occluderNode = null
-            lastRenderablePlacement = null
-            ringFingerPose = null
             fingerOccluderMesh = null
             occluderDebugVisible = null
         }
     }
 
-    LaunchedEffect(modelLoader, modelAssetPath) {
+    LaunchedEffect(modelLoader, modelAssetPath, glbSummary) {
         childNodes.clear()
         ringNode = null
         occluderNode = null
@@ -98,45 +84,42 @@ fun ArTryOnScene(
 
         val node =
             runCatching {
-                createRingNode(context = context, modelLoader = modelLoader, modelAssetPath = modelAssetPath)
+                createRingNode(context = context, modelLoader = modelLoader, modelAssetPath = modelAssetPath, glbSummary = glbSummary)
             }.onFailure { throwable ->
-                reportRendererError(stage = "model", throwable = throwable, onRendererError = onRendererError)
+                reportRendererError(
+                    stage = "model",
+                    throwable = throwable,
+                    metrics = metrics,
+                    onRendererError = onRendererError,
+                    onTelemetryUpdated = onTelemetryUpdated,
+                )
             }.getOrNull()
 
         if (node != null) {
+            metrics.onNodeRecreated()
+            onTelemetryUpdated(metrics.snapshot())
             ringNode = node
             childNodes += node
         }
     }
 
-    LaunchedEffect(trackedHandFrame, measurement, glbSummary) {
-        val handPose = trackedHandFrame?.toHandPoseSnapshot()
-        ringFingerPose = fingerPoseSolver.solve(handPose = handPose, measurement = measurement, glbSummary = glbSummary)
-    }
-
-    LaunchedEffect(trackedHandFrame, measurement, glbSummary, frameWidth, frameHeight, qualityScore, trackingState, updateAction) {
-        renderState3D =
-            renderStateFactory.create(
-                trackedHandFrame = trackedHandFrame,
-                measurement = measurement,
-                glbSummary = glbSummary,
-                frameWidth = frameWidth,
-                frameHeight = frameHeight,
-                qualityScore = qualityScore,
-                trackingState = trackingState,
-                updateAction = updateAction,
-            )
+    LaunchedEffect(renderState3D) {
+        metrics.onRenderStateUpdated(SystemClock.elapsedRealtime())
+        onTelemetryUpdated(metrics.snapshot())
     }
 
     LaunchedEffect(renderState3D, frameWidth, frameHeight) {
         fingerOccluderMesh =
-            renderState3D?.fingerOccluder?.let { occluder ->
-                occluderMeshFactory.create(
-                    state = occluder,
-                    frameWidth = frameWidth,
-                    frameHeight = frameHeight,
-                )
-            }
+            renderState3D
+                ?.takeIf { TryOnRenderPass.FingerDepthPrepass in it.renderPasses }
+                ?.fingerOccluder
+                ?.let { occluder ->
+                    occluderMeshFactory.create(
+                        state = occluder,
+                        frameWidth = frameWidth,
+                        frameHeight = frameHeight,
+                    )
+                }
     }
 
     LaunchedEffect(materialLoader, fingerOccluderMesh, debugFingerOccluderVisible) {
@@ -167,10 +150,18 @@ fun ArTryOnScene(
                         materialInstance = material,
                     )
                 }.onFailure { throwable ->
-                    reportRendererError(stage = "finger occluder", throwable = throwable, onRendererError = onRendererError)
+                    reportRendererError(
+                        stage = "finger occluder",
+                        throwable = throwable,
+                        metrics = metrics,
+                        onRendererError = onRendererError,
+                        onTelemetryUpdated = onTelemetryUpdated,
+                    )
                 }.getOrNull()
 
             if (node != null) {
+                metrics.onNodeRecreated()
+                onTelemetryUpdated(metrics.snapshot())
                 occluderNode = node
                 occluderDebugVisible = debugFingerOccluderVisible
                 childNodes.add(0, node)
@@ -179,68 +170,32 @@ fun ArTryOnScene(
             runCatching {
                 occluderNodeFactory.update(existingNode, mesh)
             }.onFailure { throwable ->
-                reportRendererError(stage = "finger occluder", throwable = throwable, onRendererError = onRendererError)
+                reportRendererError(
+                    stage = "finger occluder",
+                    throwable = throwable,
+                    metrics = metrics,
+                    onRendererError = onRendererError,
+                    onTelemetryUpdated = onTelemetryUpdated,
+                )
             }
         }
     }
 
     LaunchedEffect(
         ringNode,
-        placement,
-        frameWidth,
-        frameHeight,
-        qualityScore,
-        trackingState,
-        updateAction,
-        glbSummary,
-        ringFingerPose,
-        fingerOccluderMesh,
         renderState3D,
     ) {
         val node = ringNode ?: return@LaunchedEffect
-        val currentPlacement = placement
-        val shouldUseCurrentPlacement =
-            currentPlacement != null &&
-                qualityScore >= MIN_RENDER_QUALITY &&
-                updateAction != TryOnUpdateAction.Hide
-        val renderPlacement =
-            when {
-                shouldUseCurrentPlacement -> currentPlacement.also { lastRenderablePlacement = it }
-                updateAction == TryOnUpdateAction.HoldLastPlacement -> lastRenderablePlacement
-                updateAction == TryOnUpdateAction.FreezeScaleRotation -> lastRenderablePlacement ?: currentPlacement
-                updateAction == TryOnUpdateAction.Recover -> lastRenderablePlacement ?: currentPlacement
-                updateAction == TryOnUpdateAction.Hide -> lastRenderablePlacement
-                else -> currentPlacement ?: lastRenderablePlacement
-            }
-
-        node.isVisible = renderPlacement != null
-
         val renderState = renderState3D
         if (renderState != null) {
+            node.isVisible = TryOnRenderPass.RingModel in renderState.renderPasses
             val transform = renderState.ringTransform
             node.position = Float3(transform.positionMeters.x, transform.positionMeters.y, transform.positionMeters.z)
             node.rotation = Float3(transform.rotationDegrees.x, transform.rotationDegrees.y, transform.rotationDegrees.z)
             node.scale = Float3(transform.scale.x, transform.scale.y, transform.scale.z)
             node.setPriority(RING_PRIORITY)
-        } else if (renderPlacement != null) {
-            val transform =
-                placementMapper.map(
-                    placement = renderPlacement,
-                    frameWidth = frameWidth,
-                    frameHeight = frameHeight,
-                    glbSummary = glbSummary,
-            )
-            node.position = Float3(transform.xMeters, transform.yMeters, transform.zMeters)
-            val fingerAxisDegrees = ringFingerPose?.rotationDegrees ?: transform.rollDegrees
-            val fingerRollDegrees = ringFingerPose?.rollDegrees ?: 0f
-            node.rotation =
-                Float3(
-                    RING_PLANE_PITCH_DEGREES + fingerRollDegrees,
-                    0f,
-                    RING_AXIS_YAW_OFFSET_DEGREES - fingerAxisDegrees,
-                )
-            node.scale = Float3(transform.scale, transform.scale, transform.scale)
-            node.setPriority(RING_PRIORITY)
+        } else {
+            node.isVisible = false
         }
     }
 
@@ -264,13 +219,25 @@ fun ArTryOnScene(
             config.lightEstimationMode = Config.LightEstimationMode.ENVIRONMENTAL_HDR
         },
         onSessionFailed = { throwable ->
-            reportRendererError(stage = "session", throwable = throwable, onRendererError = onRendererError)
+            reportRendererError(
+                stage = "session",
+                throwable = throwable,
+                metrics = metrics,
+                onRendererError = onRendererError,
+                onTelemetryUpdated = onTelemetryUpdated,
+            )
         },
         onSessionUpdated = { _, frame ->
             runCatching {
                 frameSampler.acquireBitmap(frame)?.let(onCameraFrame)
             }.onFailure { throwable ->
-                reportRendererError(stage = "frame sampler", throwable = throwable, onRendererError = onRendererError)
+                reportRendererError(
+                    stage = "frame sampler",
+                    throwable = throwable,
+                    metrics = metrics,
+                    onRendererError = onRendererError,
+                    onTelemetryUpdated = onTelemetryUpdated,
+                )
             }
         },
     )
@@ -279,9 +246,13 @@ fun ArTryOnScene(
 private fun reportRendererError(
     stage: String,
     throwable: Throwable,
+    metrics: RuntimeMetricsTracker,
     onRendererError: (Throwable) -> Unit,
+    onTelemetryUpdated: (RuntimeMetrics) -> Unit,
 ) {
     Log.e(TAG, "AR renderer failed at $stage", throwable)
+    metrics.onRendererError(stage = stage, throwable = throwable)
+    onTelemetryUpdated(metrics.snapshot())
     onRendererError(ArTryOnStageException(stage = stage, source = throwable))
 }
 
@@ -294,6 +265,7 @@ private fun createRingNode(
     context: Context,
     modelLoader: ModelLoader,
     modelAssetPath: String,
+    glbSummary: GlbAssetSummary?,
 ): ModelNode {
     val assetBytes = readAssetLength(context = context, assetPath = modelAssetPath)
     val modelInstance =
@@ -306,7 +278,7 @@ private fun createRingNode(
         modelInstance = modelInstance,
         autoAnimate = false,
         scaleToUnits = null,
-        centerOrigin = Float3(0f, 0f, 0f),
+        centerOrigin = glbSummary?.pivot?.let { Float3(it.x, it.y, it.z) } ?: Float3(0f, 0f, 0f),
     ).apply {
         isEditable = false
         isTouchable = false
@@ -326,8 +298,5 @@ private fun readAssetLength(
         throw IllegalStateException("Asset is not readable: $assetPath", throwable)
     }
 
-private const val MIN_RENDER_QUALITY = 0.18f
-private const val RING_PLANE_PITCH_DEGREES = 90f
-private const val RING_AXIS_YAW_OFFSET_DEGREES = 90f
 private const val RING_PRIORITY = 4
 private const val TAG = "ArTryOnScene"

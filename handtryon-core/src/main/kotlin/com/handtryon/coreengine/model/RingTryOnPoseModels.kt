@@ -22,7 +22,34 @@ enum class RingFingerPoseRejectReason {
     FingerTooSmall,
     OutsideFrame,
     LowConfidence,
+    FingerCurled,
+    DistalSegmentHidden,
+    PointsTowardWrist,
     UnstableGeometry,
+}
+
+data class RingFingerPoseDiagnostics(
+    val extensionRatio: Float = 0f,
+    val bendCosine: Float = 0f,
+    val distalToProximalRatio: Float = 0f,
+    val forwardExtensionCosine: Float = 0f,
+    val centerOnMcpToPip: Float = 0f,
+    val lateralOffsetPx: Float = 0f,
+    val axisLengthPx: Float = 0f,
+    val rawRotationDegrees: Float = 0f,
+    val rotationCorrectionDegrees: Float = 0f,
+    val rawConfidence: Float = 0f,
+    val confidence: Float = 0f,
+    val rejectReason: RingFingerPoseRejectReason? = null,
+)
+
+data class RingFingerPoseSolveResult(
+    val pose: RingFingerPose?,
+    val rejectReason: RingFingerPoseRejectReason?,
+    val diagnostics: RingFingerPoseDiagnostics,
+) {
+    val usable: Boolean
+        get() = pose != null && rejectReason == null
 }
 
 data class RingFingerPose(
@@ -36,6 +63,7 @@ data class RingFingerPose(
     val fingerWidthPx: Float,
     val confidence: Float,
     val rejectReason: RingFingerPoseRejectReason? = null,
+    val diagnostics: RingFingerPoseDiagnostics? = null,
 )
 
 enum class RingFitSource {
@@ -54,6 +82,16 @@ data class RingFitState(
     val modelScale: Float,
     val confidence: Float,
     val source: RingFitSource,
+    val diagnostics: RingFitDiagnostics? = null,
+)
+
+data class RingFitDiagnostics(
+    val visualRingToFingerWidthRatio: Float,
+    val measuredWidthRatio: Float? = null,
+    val unclampedTargetWidthPx: Float,
+    val unclampedDepthMeters: Float,
+    val unclampedModelScale: Float,
+    val source: RingFitSource,
 )
 
 data class RingTransform3D(
@@ -67,8 +105,26 @@ data class FingerOccluderState(
     val endPx: TryOnPoint2,
     val radiusPx: Float,
     val normalHintPx: TryOnVec2,
+    val depthMeters: Float = 0.42f,
     val confidence: Float,
 )
+
+enum class TryOnRenderPass {
+    FingerDepthPrepass,
+    RingModel,
+}
+
+data class TryOnVisualQaSnapshot(
+    val attachmentRatio: Float,
+    val occluderRadiusToRingWidthRatio: Float,
+    val occluderDepthMeters: Float,
+    val ringDepthMeters: Float,
+    val renderScale: Float,
+    val warnings: List<String> = emptyList(),
+) {
+    val passesBasicGate: Boolean
+        get() = warnings.isEmpty()
+}
 
 data class TryOnRenderState3D(
     val ringTransform: RingTransform3D,
@@ -76,4 +132,6 @@ data class TryOnRenderState3D(
     val fitState: RingFitState,
     val fingerOccluder: FingerOccluderState?,
     val quality: TryOnInputQuality,
+    val renderPasses: List<TryOnRenderPass> = emptyList(),
+    val visualQa: TryOnVisualQaSnapshot? = null,
 )

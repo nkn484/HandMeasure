@@ -12,12 +12,22 @@ import com.handtryon.coreengine.model.TryOnUpdateAction
 import kotlin.math.abs
 import kotlin.math.sqrt
 
+data class TryOnSessionResolverConfig(
+    val defaultWidthRatioBase: Float = 0.16f,
+    val maxCenterDeltaPx: Float = 46f,
+    val maxRotationDeltaDeg: Float = 14f,
+    val fallbackAnchorMaxAgeMs: Long = 900L,
+    val minLastGoodAnchorScore: Float = 0.34f,
+    val minUsableMeasurementConfidence: Float = 0.35f,
+)
+
 class TryOnSessionResolverPolicy(
     private val fingerAnchorFactory: FingerAnchorFactory = DefaultFingerAnchorFactory(),
     private val trackingPolicy: TryOnTrackingStateMachinePolicy = TryOnTrackingStateMachinePolicy(),
     private val qualityPolicy: TryOnQualityPolicy = TryOnQualityPolicy(),
     private val smootherPolicy: TemporalPlacementSmootherPolicy = TemporalPlacementSmootherPolicy(),
     private val placementValidationPolicy: PlacementValidationPolicy = PlacementValidationPolicy(),
+    private val config: TryOnSessionResolverConfig = TryOnSessionResolverConfig(),
 ) {
     private var lastGoodAnchor: TryOnFingerAnchor? = null
     private var trackingSnapshot = TryOnTrackingSnapshot()
@@ -35,7 +45,7 @@ class TryOnSessionResolverPolicy(
         val detectedAnchor = handPose?.let(fingerAnchorFactory::createAnchor)?.copy(timestampMs = nowMs)
         val anchorAgeMs = lastGoodAnchor?.let { nowMs - it.timestampMs }
         val fallbackAnchor =
-            if (detectedAnchor == null && lastGoodAnchor != null && anchorAgeMs != null && anchorAgeMs in 0L..900L) {
+            if (detectedAnchor == null && lastGoodAnchor != null && anchorAgeMs != null && anchorAgeMs in 0L..config.fallbackAnchorMaxAgeMs) {
                 lastGoodAnchor
             } else {
                 null
@@ -130,7 +140,7 @@ class TryOnSessionResolverPolicy(
                 )
             }
 
-        if (detectedAnchor != null && preliminaryScore >= 0.34f) {
+        if (detectedAnchor != null && preliminaryScore >= config.minLastGoodAnchorScore) {
             lastGoodAnchor = detectedAnchor
         }
 
@@ -162,7 +172,7 @@ class TryOnSessionResolverPolicy(
         TryOnPlacement(
             centerX = anchor.centerX,
             centerY = anchor.centerY,
-            ringWidthPx = (anchor.fingerWidthPx * asset.defaultWidthRatio / DEFAULT_WIDTH_RATIO_BASE).coerceAtLeast(18f),
+            ringWidthPx = (anchor.fingerWidthPx * asset.defaultWidthRatio / config.defaultWidthRatioBase).coerceAtLeast(18f),
             rotationDegrees = anchor.angleDegrees,
         )
 
@@ -179,7 +189,7 @@ class TryOnSessionResolverPolicy(
                 anchor.fingerWidthPx
             }
         val ringWidth = (measuredDiameterPx ?: fallbackByRatio).coerceAtLeast(18f)
-        val scaledWidth = ringWidth * (asset.defaultWidthRatio / DEFAULT_WIDTH_RATIO_BASE)
+        val scaledWidth = ringWidth * (asset.defaultWidthRatio / config.defaultWidthRatioBase)
         return TryOnPlacement(
             centerX = anchor.centerX,
             centerY = anchor.centerY,
@@ -209,10 +219,10 @@ class TryOnSessionResolverPolicy(
     ): TryOnPlacement {
         val old = previous ?: return current
         val clampedWidth = clampDelta(current.ringWidthPx, old.ringWidthPx, old.ringWidthPx * 0.16f)
-        val clampedCenterX = clampDelta(current.centerX, old.centerX, MAX_CENTER_DELTA_PX)
-        val clampedCenterY = clampDelta(current.centerY, old.centerY, MAX_CENTER_DELTA_PX)
+        val clampedCenterX = clampDelta(current.centerX, old.centerX, config.maxCenterDeltaPx)
+        val clampedCenterY = clampDelta(current.centerY, old.centerY, config.maxCenterDeltaPx)
         val deltaRotation = normalizeRotationDelta(current.rotationDegrees - old.rotationDegrees)
-        val clampedRotation = old.rotationDegrees + deltaRotation.coerceIn(-MAX_ROTATION_DELTA_DEG, MAX_ROTATION_DELTA_DEG)
+        val clampedRotation = old.rotationDegrees + deltaRotation.coerceIn(-config.maxRotationDeltaDeg, config.maxRotationDeltaDeg)
         return TryOnPlacement(
             centerX = clampedCenterX,
             centerY = clampedCenterY,
@@ -284,12 +294,6 @@ class TryOnSessionResolverPolicy(
         val measurement = this ?: return false
         if (!measurement.usable) return false
         if (measurement.equivalentDiameterMm <= 0f) return false
-        return measurement.confidence >= 0.35f
-    }
-
-    private companion object {
-        const val DEFAULT_WIDTH_RATIO_BASE = 0.16f
-        const val MAX_CENTER_DELTA_PX = 46f
-        const val MAX_ROTATION_DELTA_DEG = 14f
+        return measurement.confidence >= config.minUsableMeasurementConfidence
     }
 }

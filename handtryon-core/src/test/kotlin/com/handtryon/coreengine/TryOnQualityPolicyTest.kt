@@ -5,6 +5,7 @@ import com.handtryon.coreengine.model.TryOnMode
 import com.handtryon.coreengine.model.TryOnPlacementValidation
 import com.handtryon.coreengine.model.TryOnTrackingState
 import com.handtryon.coreengine.model.TryOnUpdateAction
+import com.handtryon.coreengine.validation.TryOnTemporalJitterMetrics
 import org.junit.Test
 
 class TryOnQualityPolicyTest {
@@ -91,6 +92,21 @@ class TryOnQualityPolicyTest {
         assertThat(result.updateAction).isEqualTo(TryOnUpdateAction.Update)
     }
 
+    @Test
+    fun temporal_jitter_adds_quality_hints() {
+        val result =
+            policy.evaluate(
+                baseSignals(
+                    trackingState = TryOnTrackingState.Locked,
+                    landmarkConfidence = 0.82f,
+                    temporalMetrics = temporalMetrics(warnings = listOf("scale_jitter_high", "update_rate_low")),
+                ),
+            )
+
+        assertThat(result.hints).contains("scale_unstable")
+        assertThat(result.hints).contains("tracking_update_rate_low")
+    }
+
     private fun baseSignals(
         mode: TryOnMode = TryOnMode.LandmarkOnly,
         trackingState: TryOnTrackingState,
@@ -103,6 +119,7 @@ class TryOnQualityPolicyTest {
         placementJumpRatio: Float = 0.08f,
         validation: TryOnPlacementValidation = validValidation(),
         hasPreviousPlacement: Boolean = true,
+        temporalMetrics: TryOnTemporalJitterMetrics? = null,
     ): TryOnQualitySignals =
         TryOnQualitySignals(
             mode = mode,
@@ -116,6 +133,7 @@ class TryOnQualityPolicyTest {
             validation = validation,
             trackingState = trackingState,
             hasPreviousPlacement = hasPreviousPlacement,
+            temporalMetrics = temporalMetrics,
         )
 
     private fun validValidation(): TryOnPlacementValidation =
@@ -134,5 +152,23 @@ class TryOnQualityPolicyTest {
             rotationJumpDeg = 34f,
             isPlacementUsable = false,
             notes = listOf("far_from_anchor", "rotation_jump_high"),
+        )
+
+    private fun temporalMetrics(warnings: List<String>): TryOnTemporalJitterMetrics =
+        TryOnTemporalJitterMetrics(
+            sampleCount = 12,
+            measuredSampleCount = 12,
+            durationMs = 900L,
+            effectiveUpdateHz = 12.2f,
+            avgCenterStepRatio = 0.04f,
+            maxCenterStepRatio = 0.06f,
+            avgScaleStepRatio = 0.03f,
+            maxScaleStepRatio = 0.04f,
+            avgRotationStepDeg = 2f,
+            maxRotationStepDeg = 4f,
+            hiddenFrames = 0,
+            frozenFrames = 0,
+            lowQualityFrames = 0,
+            warnings = warnings,
         )
 }
