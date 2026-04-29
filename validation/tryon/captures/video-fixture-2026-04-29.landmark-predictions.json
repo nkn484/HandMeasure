@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "source": "landmark_fixture_stub_v1",
+  "annotationFile": "video-fixture-2026-04-29.json",
+  "frames": [
+    {
+      "file": "video_fixture.mp4",
+      "frameIndex": 0,
+      "predictedRingFingerZone": {
+        "centerX": 260.0,
+        "centerY": 472.0,
+        "widthPx": 70.0,
+        "rotationDeg": 89.0,
+        "confidence": 0.93
+      },
+      "updateAction": "Apply"
+    },
+    {
+      "file": "video_fixture.mp4",
+      "frameIndex": 130,
+      "predictedRingFingerZone": {
+        "centerX": 259.0,
+        "centerY": 530.0,
+        "widthPx": 73.0,
+        "rotationDeg": 87.0,
+        "confidence": 0.91
+      },
+      "updateAction": "Apply"
+    },
+    {
+      "file": "video_fixture.mp4",
+      "frameIndex": 260,
+      "predictedRingFingerZone": {
+        "centerX": 270.0,
+        "centerY": 610.0,
+        "widthPx": 80.0,
+        "rotationDeg": 88.0,
+        "confidence": 0.58
+      },
+      "updateAction": "FreezeScaleRotation"
+    },
+    {
+      "file": "video_fixture.mp4",
+      "frameIndex": 391,
+      "predictedRingFingerZone": {
+        "centerX": 370.0,
+        "centerY": 700.0,
+        "widthPx": 84.0,
+        "rotationDeg": 90.0,
+        "confidence": 0.46
+      },
+      "updateAction": "Hide"
+    },
+    {
+      "file": "video_fixture.mp4",
+      "frameIndex": 521,
+      "predictedRingFingerZone": {
+        "centerX": 236.0,
+        "centerY": 655.0,
+        "widthPx": 73.0,
+        "rotationDeg": 87.0,
+        "confidence": 0.9
+      },
+      "updateAction": "Apply"
+    },
+    {
+      "file": "video_fixture.mp4",
+      "frameIndex": 651,
+      "predictedRingFingerZone": {
+        "centerX": 274.0,
+        "centerY": 500.0,
+        "widthPx": 80.0,
+        "rotationDeg": 78.0,
+        "confidence": 0.82
+      },
+      "updateAction": "Apply"
+    }
+  ]
+}

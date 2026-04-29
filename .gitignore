@@ -6,5 +6,7 @@ local.properties
 **/build/
 *.iml
 captures/
+!validation/tryon/captures/
+!validation/tryon/captures/*.json
 logs/
 validation/tryon/reports/

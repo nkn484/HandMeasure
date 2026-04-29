@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "source": "landmark_fixture_stub_v1",
+  "annotationFile": "real-screenshots-2026-04-29.json",
+  "frames": [
+    {
+      "file": "screenshot_0047_hand_visible.jpg",
+      "predictedRingFingerZone": {
+        "centerX": 402.0,
+        "centerY": 732.0,
+        "widthPx": 78.0,
+        "rotationDeg": 89.0,
+        "confidence": 0.9
+      },
+      "updateAction": "Apply"
+    },
+    {
+      "file": "screenshot_0046_hand_missing.jpg",
+      "predictedRingFingerZone": {
+        "centerX": 0.0,
+        "centerY": 0.0,
+        "widthPx": 0.0,
+        "rotationDeg": 0.0,
+        "confidence": 0.22
+      },
+      "updateAction": "Hide"
+    }
+  ]
+}

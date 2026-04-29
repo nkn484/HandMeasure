@@ -52,3 +52,32 @@ dependencies {
     testImplementation("com.google.truth:truth:1.4.4")
     testImplementation("org.json:json:20240303")
 }
+
+tasks.register<Exec>("runTryOnReplayValidation") {
+    workingDir = rootDir
+    commandLine(
+        "python",
+        "tools/tryon/replay_validation.py",
+        "--annotations",
+        "validation/tryon/reference-annotations/video-fixture-2026-04-29.json",
+        "--image-dir",
+        "validation/tryon/reference-images",
+        "--fixture-manifest",
+        "validation/tryon/reference-annotations/fixture-manifest.json",
+        "--predictions",
+        "validation/tryon/captures/video-fixture-2026-04-29.landmark-predictions.json",
+        "--report-dir",
+        "validation/tryon/reports",
+        "--center-ratio-threshold",
+        "0.35",
+        "--min-center-ratio-pass-rate",
+        "0.85",
+        "--steady-scale-delta-threshold",
+        "0.12",
+        "--steady-rotation-jitter-threshold",
+        "8.0",
+        "--min-steady-pass-rate",
+        "0.85",
+        "--strict-gate",
+    )
+}

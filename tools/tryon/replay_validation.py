@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Minimal replay harness for ring try-on validation fixtures."""
+"""Replay harness for ring try-on validation fixtures with regression gates."""
 
 from __future__ import annotations
 
 import argparse
 import csv
+import html
 import json
 import math
 from dataclasses import dataclass
@@ -18,7 +19,21 @@ import cv2
 DEFAULT_CENTER_THRESHOLD_PX = 24.0
 DEFAULT_WIDTH_THRESHOLD_PX = 14.0
 DEFAULT_ROTATION_THRESHOLD_DEG = 18.0
+DEFAULT_CENTER_RATIO_THRESHOLD = 0.35
+DEFAULT_MIN_CENTER_RATIO_PASS_RATE = 0.85
+DEFAULT_STEADY_SCALE_DELTA_THRESHOLD = 0.12
+DEFAULT_STEADY_ROTATION_JITTER_THRESHOLD = 8.0
+DEFAULT_MIN_STEADY_PASS_RATE = 0.85
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"}
+STEADY_EXCLUDE_NOTES = {
+    "expect_hide",
+    "expect_hold",
+    "fist",
+    "hidden",
+    "occlusion",
+    "not_fit_ready",
+    "challenging",
+}
 
 
 @dataclass(frozen=True)
@@ -36,6 +51,8 @@ class Prediction:
     width_px: float
     rotation_deg: float
     confidence: float
+    update_action: str | None
+    tracking_state: str | None
 
 
 def parse_args() -> argparse.Namespace:
@@ -48,6 +65,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--center-threshold-px", type=float, default=DEFAULT_CENTER_THRESHOLD_PX)
     parser.add_argument("--width-threshold-px", type=float, default=DEFAULT_WIDTH_THRESHOLD_PX)
     parser.add_argument("--rotation-threshold-deg", type=float, default=DEFAULT_ROTATION_THRESHOLD_DEG)
+    parser.add_argument("--center-ratio-threshold", type=float, default=DEFAULT_CENTER_RATIO_THRESHOLD)
+    parser.add_argument("--min-center-ratio-pass-rate", type=float, default=DEFAULT_MIN_CENTER_RATIO_PASS_RATE)
+    parser.add_argument("--steady-scale-delta-threshold", type=float, default=DEFAULT_STEADY_SCALE_DELTA_THRESHOLD)
+    parser.add_argument(
+        "--steady-rotation-jitter-threshold",
+        type=float,
+        default=DEFAULT_STEADY_ROTATION_JITTER_THRESHOLD,
+    )
+    parser.add_argument("--min-steady-pass-rate", type=float, default=DEFAULT_MIN_STEADY_PASS_RATE)
+    parser.add_argument("--strict-gate", action="store_true")
     return parser.parse_args()
 
 
@@ -68,7 +95,7 @@ def load_fixture_metadata(path: Path | None, annotation_path: Path, media: dict[
 
 
 def load_predictions(path: Path | None) -> dict[str, Prediction]:
-    if path is None:
+    if path is None or not path.exists():
         return {}
     payload = load_json(path)
     frames = payload.get("frames", [])
@@ -83,8 +110,17 @@ def load_predictions(path: Path | None) -> dict[str, Prediction]:
             width_px=float(zone["widthPx"]),
             rotation_deg=float(zone["rotationDeg"]),
             confidence=float(zone.get("confidence", frame.get("confidence", 0.0))),
+            update_action=as_optional_str(frame.get("updateAction") or frame.get("qualityAction")),
+            tracking_state=as_optional_str(frame.get("trackingState")),
         )
     return predictions
+
+
+def as_optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text if text else None
 
 
 def prediction_key(file_name: str, frame_index: Any = None) -> str:
@@ -194,7 +230,7 @@ def assess_annotation_quality(
         notes.append("ring_zone_width_too_small")
     if visible_finger and zone_present and zone.width_px > frame_width * 0.35:
         notes.append("ring_zone_width_too_large")
-    if declared_quality in {"medium", "challenging"}:
+    if declared_quality in {"medium", "challenging", "manual_blue_review"}:
         notes.append(f"manual_quality_{declared_quality}")
 
     status = "good" if not notes else "review"
@@ -239,6 +275,10 @@ def row_for_frame(
         "frameIndex": frame_index,
         "timeSec": frame.get("timeSec"),
         "visibleFinger": visible_finger,
+        "expectedCenterX": expected.center_x,
+        "expectedCenterY": expected.center_y,
+        "expectedWidthPx": expected.width_px,
+        "expectedRotationDeg": expected.rotation_deg,
         **quality,
     }
 
@@ -248,9 +288,13 @@ def row_for_frame(
             "status": read_status,
             "pass": False,
             "centerErrorPx": None,
+            "centerErrorOverRingWidth": None,
             "widthErrorPx": None,
+            "scaleDelta": None,
             "rotationErrorDeg": None,
             "confidence": 0.0,
+            "updateAction": None,
+            "trackingState": None,
             "reason": f"Fixture frame is not readable: {image_path} ({read_status})",
         }
 
@@ -261,15 +305,22 @@ def row_for_frame(
             "status": "missing_prediction",
             "pass": False,
             "centerErrorPx": None,
+            "centerErrorOverRingWidth": None,
             "widthErrorPx": None,
+            "scaleDelta": None,
             "rotationErrorDeg": None,
             "confidence": 0.0,
+            "updateAction": None,
+            "trackingState": None,
             "reason": "No replay prediction was provided for this image.",
         }
 
     center_error = math.hypot(prediction.center_x - expected.center_x, prediction.center_y - expected.center_y)
     width_error = abs(prediction.width_px - expected.width_px)
     rotation_error = normalize_axis_degrees(prediction.rotation_deg - expected.rotation_deg)
+    width_denominator = max(1.0, expected.width_px)
+    center_error_ratio = center_error / width_denominator
+    scale_delta = width_error / width_denominator
     passed = (
         center_error <= center_threshold_px
         and width_error <= width_threshold_px
@@ -280,10 +331,18 @@ def row_for_frame(
         **base_row,
         "status": "measured",
         "pass": passed,
+        "predictedCenterX": round(prediction.center_x, 4),
+        "predictedCenterY": round(prediction.center_y, 4),
+        "predictedWidthPx": round(prediction.width_px, 4),
+        "predictedRotationDeg": round(prediction.rotation_deg, 4),
         "centerErrorPx": round(center_error, 4),
+        "centerErrorOverRingWidth": round(center_error_ratio, 6),
         "widthErrorPx": round(width_error, 4),
+        "scaleDelta": round(scale_delta, 6),
         "rotationErrorDeg": round(rotation_error, 4),
         "confidence": round(prediction.confidence, 4),
+        "updateAction": prediction.update_action,
+        "trackingState": prediction.tracking_state,
         "reason": "" if passed else "Metric exceeded replay threshold.",
     }
 
@@ -299,13 +358,25 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         "annotationQualityStatus",
         "declaredAnnotationQuality",
         "annotationQualityNotes",
+        "expectedCenterX",
+        "expectedCenterY",
+        "expectedWidthPx",
+        "expectedRotationDeg",
+        "predictedCenterX",
+        "predictedCenterY",
+        "predictedWidthPx",
+        "predictedRotationDeg",
+        "centerErrorPx",
+        "centerErrorOverRingWidth",
+        "widthErrorPx",
+        "scaleDelta",
+        "rotationErrorDeg",
+        "confidence",
+        "updateAction",
+        "trackingState",
         "brightnessMean",
         "contrastStd",
         "laplacianSharpness",
-        "centerErrorPx",
-        "widthErrorPx",
-        "rotationErrorDeg",
-        "confidence",
         "reason",
     ]
     with path.open("w", encoding="utf-8", newline="") as handle:
@@ -313,6 +384,120 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         writer.writeheader()
         for row in rows:
             writer.writerow({field: row.get(field) for field in fieldnames})
+
+
+def frame_sort_key(row: dict[str, Any]) -> tuple[float, int]:
+    time_sec = row.get("timeSec")
+    if time_sec is not None:
+        return float(time_sec), int(row.get("frameIndex") or 0)
+    return float(row.get("frameIndex") or 0), int(row.get("frameIndex") or 0)
+
+
+def is_steady_candidate(row: dict[str, Any]) -> bool:
+    if row.get("status") != "measured" or not row.get("visibleFinger", True):
+        return False
+    if row.get("annotationQualityStatus") == "bad":
+        return False
+    notes = [str(note).lower() for note in row.get("annotationQualityNotes", [])]
+    for note in notes:
+        if any(token in note for token in STEADY_EXCLUDE_NOTES):
+            return False
+    return True
+
+
+def steady_pair_metrics(measured_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    steady_rows = [row for row in measured_rows if is_steady_candidate(row)]
+    steady_rows.sort(key=frame_sort_key)
+    pairs: list[dict[str, Any]] = []
+    for previous, current in zip(steady_rows, steady_rows[1:]):
+        prev_expected_width = max(1.0, float(previous["expectedWidthPx"]))
+        curr_expected_width = max(1.0, float(current["expectedWidthPx"]))
+        expected_avg_width = (prev_expected_width + curr_expected_width) * 0.5
+        expected_center_delta = math.hypot(
+            float(current["expectedCenterX"]) - float(previous["expectedCenterX"]),
+            float(current["expectedCenterY"]) - float(previous["expectedCenterY"]),
+        )
+        expected_scale_delta = abs(curr_expected_width - prev_expected_width) / expected_avg_width
+        expected_rotation_delta = normalize_axis_degrees(
+            float(current["expectedRotationDeg"]) - float(previous["expectedRotationDeg"])
+        )
+        if expected_center_delta > expected_avg_width * 0.22:
+            continue
+        if expected_scale_delta > 0.10:
+            continue
+        if expected_rotation_delta > 6.0:
+            continue
+
+        prev_pred_width = max(1.0, float(previous["predictedWidthPx"]))
+        curr_pred_width = max(1.0, float(current["predictedWidthPx"]))
+        scale_delta = abs(curr_pred_width - prev_pred_width) / prev_pred_width
+        rotation_jitter = normalize_axis_degrees(
+            float(current["predictedRotationDeg"]) - float(previous["predictedRotationDeg"])
+        )
+        pairs.append(
+            {
+                "fromFrameIndex": previous.get("frameIndex"),
+                "toFrameIndex": current.get("frameIndex"),
+                "scaleDelta": round(scale_delta, 6),
+                "rotationJitterDeg": round(rotation_jitter, 6),
+            }
+        )
+    return pairs
+
+
+def write_text_summary(path: Path, report: dict[str, Any]) -> None:
+    summary = report["summary"]
+    gate = report["gate"]
+    lines = [
+        "TryOn Replay Validation Summary",
+        f"status: {report['status']}",
+        f"annotation: {report['annotationFile']}",
+        f"frames: total={summary['totalFrames']} measured={summary['measuredFrames']} failed={summary['failedFrames']}",
+        f"missing fixtures: {summary['missingFixtures']}, missing predictions: {summary['missingPredictions']}",
+        f"center ratio pass rate: {gate['centerRatioPassRate']}",
+        f"steady scale pass rate: {gate['steadyScalePassRate']}",
+        f"steady rotation pass rate: {gate['steadyRotationPassRate']}",
+        f"hidden count: {summary['hiddenCount']}, frozen count: {summary['frozenCount']}",
+    ]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_html_summary(path: Path, report: dict[str, Any]) -> None:
+    summary = report["summary"]
+    gate = report["gate"]
+    html_content = f"""<!doctype html>
+<html>
+  <head><meta charset="utf-8"><title>TryOn Replay Validation</title></head>
+  <body>
+    <h1>TryOn Replay Validation</h1>
+    <p><strong>Status:</strong> {html.escape(str(report["status"]))}</p>
+    <p><strong>Annotation:</strong> {html.escape(str(report["annotationFile"]))}</p>
+    <ul>
+      <li>Total frames: {summary["totalFrames"]}</li>
+      <li>Measured frames: {summary["measuredFrames"]}</li>
+      <li>Failed frames: {summary["failedFrames"]}</li>
+      <li>Missing fixtures: {summary["missingFixtures"]}</li>
+      <li>Missing predictions: {summary["missingPredictions"]}</li>
+      <li>Center ratio pass rate: {gate["centerRatioPassRate"]}</li>
+      <li>Steady scale pass rate: {gate["steadyScalePassRate"]}</li>
+      <li>Steady rotation pass rate: {gate["steadyRotationPassRate"]}</li>
+      <li>Hidden count: {summary["hiddenCount"]}</li>
+      <li>Frozen count: {summary["frozenCount"]}</li>
+    </ul>
+  </body>
+</html>
+"""
+    path.write_text(html_content, encoding="utf-8")
+
+
+def rate(numerator: int, denominator: int) -> float:
+    if denominator <= 0:
+        return 0.0
+    return numerator / float(denominator)
+
+
+def to_percent(value: float) -> float:
+    return round(value * 100.0, 2)
 
 
 def main() -> int:
@@ -336,11 +521,58 @@ def main() -> int:
         for frame in annotations.get("frames", [])
     ]
     measured_rows = [row for row in rows if row["status"] == "measured"]
+    visible_measured_rows = [row for row in measured_rows if row.get("visibleFinger", True)]
     missing_rows = [row for row in rows if row["status"] == "missing_fixture"]
     missing_prediction_rows = [row for row in rows if row["status"] == "missing_prediction"]
     bad_annotation_rows = [row for row in rows if row["annotationQualityStatus"] == "bad"]
     review_annotation_rows = [row for row in rows if row["annotationQualityStatus"] == "review"]
     failed_rows = [row for row in rows if not row["pass"]]
+    hidden_count = len(
+        [
+            row
+            for row in measured_rows
+            if str(row.get("updateAction", "")).lower().strip() in {"hide", "hidden"}
+        ]
+    )
+    frozen_count = len(
+        [
+            row
+            for row in measured_rows
+            if "freeze" in str(row.get("updateAction", "")).lower().strip()
+        ]
+    )
+
+    center_ratio_pass_count = len(
+        [
+            row
+            for row in visible_measured_rows
+            if row.get("centerErrorOverRingWidth") is not None
+            and float(row["centerErrorOverRingWidth"]) <= args.center_ratio_threshold
+        ]
+    )
+    center_ratio_total = len(visible_measured_rows)
+    center_ratio_pass_rate = rate(center_ratio_pass_count, center_ratio_total)
+
+    steady_pairs = steady_pair_metrics(measured_rows)
+    steady_scale_pass_count = len(
+        [pair for pair in steady_pairs if float(pair["scaleDelta"]) <= args.steady_scale_delta_threshold]
+    )
+    steady_rotation_pass_count = len(
+        [pair for pair in steady_pairs if float(pair["rotationJitterDeg"]) <= args.steady_rotation_jitter_threshold]
+    )
+    steady_pair_total = len(steady_pairs)
+    steady_scale_pass_rate = rate(steady_scale_pass_count, steady_pair_total)
+    steady_rotation_pass_rate = rate(steady_rotation_pass_count, steady_pair_total)
+
+    gate_passed = (
+        not missing_rows
+        and not bad_annotation_rows
+        and not missing_prediction_rows
+        and center_ratio_pass_rate >= args.min_center_ratio_pass_rate
+        and (steady_pair_total == 0 or steady_scale_pass_rate >= args.min_steady_pass_rate)
+        and (steady_pair_total == 0 or steady_rotation_pass_rate >= args.min_steady_pass_rate)
+    )
+
     overall_status = (
         "missing_fixtures"
         if missing_rows
@@ -348,57 +580,89 @@ def main() -> int:
         if bad_annotation_rows
         else "awaiting_predictions"
         if missing_prediction_rows and not measured_rows
-        else "failed"
-        if failed_rows
+        else "failed_gate"
+        if not gate_passed
         else "passed"
     )
     report = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "annotationFile": str(args.annotations),
         "imageDir": str(args.image_dir),
+        "predictionsFile": str(args.predictions) if args.predictions else None,
         "media": media,
         "fixtureMetadata": fixture_metadata,
         "pipeline": [
             "image_or_video_frame",
-            "mediapipe_landmarks",
+            "landmark_fixture_or_prediction",
             "tracked_hand_frame",
             "ring_finger_pose",
             "ring_fit",
             "render_state",
             "metrics",
+            "gate",
         ],
         "thresholds": {
             "centerErrorPx": args.center_threshold_px,
             "widthErrorPx": args.width_threshold_px,
             "rotationErrorDeg": args.rotation_threshold_deg,
+            "centerErrorOverRingWidth": args.center_ratio_threshold,
+            "minCenterRatioPassRate": args.min_center_ratio_pass_rate,
+            "steadyScaleDelta": args.steady_scale_delta_threshold,
+            "steadyRotationJitterDeg": args.steady_rotation_jitter_threshold,
+            "minSteadyPassRate": args.min_steady_pass_rate,
         },
         "status": overall_status,
         "summary": {
             "totalFrames": len(rows),
             "measuredFrames": len(measured_rows),
+            "visibleMeasuredFrames": len(visible_measured_rows),
             "missingFixtures": len(missing_rows),
             "missingPredictions": len(missing_prediction_rows),
             "badAnnotationFrames": len(bad_annotation_rows),
             "reviewAnnotationFrames": len(review_annotation_rows),
             "failedFrames": len(failed_rows),
+            "hiddenCount": hidden_count,
+            "frozenCount": frozen_count,
+            "steadyPairCount": steady_pair_total,
         },
+        "gate": {
+            "passed": gate_passed,
+            "centerRatioPassCount": center_ratio_pass_count,
+            "centerRatioTotal": center_ratio_total,
+            "centerRatioPassRate": to_percent(center_ratio_pass_rate),
+            "steadyScalePassCount": steady_scale_pass_count,
+            "steadyRotationPassCount": steady_rotation_pass_count,
+            "steadyPairTotal": steady_pair_total,
+            "steadyScalePassRate": to_percent(steady_scale_pass_rate),
+            "steadyRotationPassRate": to_percent(steady_rotation_pass_rate),
+        },
+        "steadyPairs": steady_pairs,
         "frames": rows,
     }
 
     report_name = args.annotations.stem
     json_path = args.report_dir / f"{report_name}-report.json"
     csv_path = args.report_dir / f"{report_name}-report.csv"
+    text_path = args.report_dir / f"{report_name}-summary.txt"
+    html_path = args.report_dir / f"{report_name}-summary.html"
     with json_path.open("w", encoding="utf-8") as handle:
         json.dump(report, handle, indent=2, ensure_ascii=False)
         handle.write("\n")
     write_csv(csv_path, rows)
+    write_text_summary(text_path, report)
+    write_html_summary(html_path, report)
 
     print(f"Replay validation status: {overall_status}")
     print(f"JSON report: {json_path}")
     print(f"CSV report: {csv_path}")
+    print(f"Text summary: {text_path}")
+    print(f"HTML summary: {html_path}")
     for row in missing_rows:
         print(row["reason"])
+
+    if args.strict_gate and not gate_passed:
+        return 2
     return 0
 
 
