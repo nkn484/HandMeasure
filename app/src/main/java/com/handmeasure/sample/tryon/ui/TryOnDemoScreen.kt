@@ -68,6 +68,11 @@ import com.handtryon.domain.TryOnTrackingState
 import com.handtryon.domain.TryOnUpdateAction
 import com.handtryon.realtime.TryOnRealtimeAnalyzer
 import com.handtryon.render.StableRingOverlayRenderer
+import com.handtryon.tracking.FrameSource
+import com.handtryon.tracking.Handedness
+import com.handtryon.tracking.TargetFinger
+import com.handtryon.tracking.TrackedHandFrame
+import com.handtryon.tracking.TrackedHandFrameMapper
 import com.handtryon.ui.TryOnOverlay
 import com.handtryon.validation.RuntimeMetrics
 import com.handtryon.validation.RuntimeMetricsTracker
@@ -109,6 +114,7 @@ fun TryOnDemoScreen(
     var hasCameraPermission by remember { mutableStateOf(false) }
     var latestFrame by remember { mutableStateOf<Bitmap?>(null) }
     var latestHandPose by remember { mutableStateOf<HandPoseSnapshot?>(null) }
+    var latestTrackedHandFrame by remember { mutableStateOf<TrackedHandFrame?>(null) }
     var session by remember { mutableStateOf<TryOnSession?>(null) }
     var manualPlacement by remember { mutableStateOf<RingPlacement?>(null) }
     var manualAdjustEnabled by remember { mutableStateOf(false) }
@@ -117,6 +123,7 @@ fun TryOnDemoScreen(
     var latestMeasurementHandoff by remember { mutableStateOf<TryOnDemoHandoff?>(null) }
     var arPreviewEnabled by rememberSaveable { mutableStateOf(false) }
     var hasSelectedPreviewMode by rememberSaveable { mutableStateOf(false) }
+    var debugFingerOccluderVisible by rememberSaveable { mutableStateOf(false) }
     var rendererError by remember { mutableStateOf<String?>(null) }
     var hasTriggeredAutoMeasure by rememberSaveable { mutableStateOf(false) }
 
@@ -288,9 +295,11 @@ fun TryOnDemoScreen(
                     onDetectionFrame = { frame, timestampMs ->
                         val detection = synchronized(handDetectionLock) { handLandmarkEngine.detect(frame) }
                             val pose = detection?.toPoseSnapshot(frame.width, frame.height, timestampMs)
+                            val trackedFrame = pose?.toTrackedHandFrame(source = FrameSource.CameraX)
                             ContextCompat.getMainExecutor(context).execute {
                                 handPoseProvider.snapshot = pose
                                 latestHandPose = pose
+                                latestTrackedHandFrame = trackedFrame
                                 latestFrame = upsertSnapshot(latestFrame, frame)
                             if (!manualAdjustEnabled || session == null) {
                                 session =
@@ -330,6 +339,7 @@ fun TryOnDemoScreen(
                 exportRenderer.reset()
                 latestFrame?.recycle()
                 latestFrame = null
+                latestTrackedHandFrame = null
             }
         }
     }
@@ -353,8 +363,9 @@ fun TryOnDemoScreen(
                 qualityScore = currentSession?.quality?.qualityScore ?: 0.62f,
                 trackingState = currentSession?.quality?.trackingState ?: TryOnTrackingState.Searching,
                 updateAction = currentSession?.quality?.updateAction ?: TryOnUpdateAction.Update,
-                handPose = latestHandPose,
+                trackedHandFrame = latestTrackedHandFrame,
                 measurement = measurementProvider.latestMeasurement(),
+                debugFingerOccluderVisible = debugFingerOccluderVisible,
                 onRendererError = { throwable ->
                     rendererError = "ARCore 3D: ${throwable.message ?: throwable::class.java.simpleName}"
                 },
@@ -377,11 +388,13 @@ fun TryOnDemoScreen(
                                 )
                                 val metrics = arRuntimeMetricsTracker.snapshot()
                                 val pose = detection?.toPoseSnapshot(bitmap.width, bitmap.height, cameraFrame.timestampMs)
+                                val trackedFrame = pose?.toTrackedHandFrame(source = FrameSource.ARCoreCpuImage)
                                 ContextCompat.getMainExecutor(context).execute {
                                     try {
                                         runtimeMetrics = metrics
                                         handPoseProvider.snapshot = pose
                                         latestHandPose = pose
+                                        latestTrackedHandFrame = trackedFrame
                                         latestFrame = upsertSnapshot(latestFrame, bitmap)
                                         if (!manualAdjustEnabled || session == null) {
                                             session =
@@ -586,6 +599,21 @@ fun TryOnDemoScreen(
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
+                    onClick = { debugFingerOccluderVisible = !debugFingerOccluderVisible },
+                    modifier = Modifier.weight(1f),
+                    enabled = isModel3dPreviewActive,
+                ) {
+                    Text(if (debugFingerOccluderVisible) "Ẩn occluder debug" else "Hiện occluder debug")
+                }
+                Text(
+                    text = "Occluder Phase A: ${if (debugFingerOccluderVisible) "debug mesh" else "depth-only"}",
+                    color = Color(0xFFE0E0E0),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
                     onClick = {
                         manualAdjustEnabled = false
                         session = resolveSessionState(manualPlacementOverride = null)
@@ -773,6 +801,34 @@ private fun HandDetection.toPoseSnapshot(
         confidence = confidence.coerceIn(0f, 1f),
         timestampMs = timestampMs,
     )
+
+private fun HandPoseSnapshot.toTrackedHandFrame(source: FrameSource): TrackedHandFrame =
+    when (source) {
+        FrameSource.CameraX ->
+            TrackedHandFrameMapper.fromCameraXSnapshot(
+                pose = this,
+                handedness = Handedness.Unknown,
+                targetFinger = TargetFinger.Ring,
+                isFrontCamera = false,
+                sensorRotationDegrees = 0,
+            )
+        FrameSource.ARCoreCpuImage ->
+            TrackedHandFrameMapper.fromArCoreCpuImageSnapshot(
+                pose = this,
+                handedness = Handedness.Unknown,
+                targetFinger = TargetFinger.Ring,
+                imageRotationDegrees = 0,
+            )
+        FrameSource.Replay ->
+            TrackedHandFrameMapper.fromHandPoseSnapshot(
+                pose = this,
+                source = FrameSource.Replay,
+                handedness = Handedness.Unknown,
+                targetFinger = TargetFinger.Ring,
+                isMirrored = false,
+                rotationDegrees = 0,
+            )
+    }
 
 private fun saveRenderedBitmap(
     context: Context,

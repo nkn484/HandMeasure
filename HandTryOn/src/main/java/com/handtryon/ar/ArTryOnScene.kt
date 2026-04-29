@@ -13,7 +13,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.google.ar.core.Config
 import com.handtryon.domain.GlbAssetSummary
-import com.handtryon.domain.HandPoseSnapshot
 import com.handtryon.domain.MeasurementSnapshot
 import com.handtryon.domain.RingPlacement
 import com.handtryon.domain.TryOnTrackingState
@@ -25,6 +24,7 @@ import com.handtryon.nonar3d.FingerOccluderNodeFactory
 import com.handtryon.nonar3d.RingFingerPose3D
 import com.handtryon.nonar3d.RingFingerPoseSolver
 import com.handtryon.render3d.TryOnRenderState3DFactory
+import com.handtryon.tracking.TrackedHandFrame
 import dev.romainguy.kotlin.math.Float3
 import io.github.sceneview.ar.ARScene
 import io.github.sceneview.ar.rememberARCameraStream
@@ -46,8 +46,9 @@ fun ArTryOnScene(
     qualityScore: Float,
     trackingState: TryOnTrackingState,
     updateAction: TryOnUpdateAction,
-    handPose: HandPoseSnapshot? = null,
+    trackedHandFrame: TrackedHandFrame? = null,
     measurement: MeasurementSnapshot? = null,
+    debugFingerOccluderVisible: Boolean = false,
     modifier: Modifier = Modifier,
     onCameraFrame: (ArCameraBitmapFrame) -> Unit = { it.bitmap.recycle() },
     onRendererError: (Throwable) -> Unit = {},
@@ -70,6 +71,7 @@ fun ArTryOnScene(
     var lastRenderablePlacement by remember { mutableStateOf<RingPlacement?>(null) }
     var ringFingerPose by remember { mutableStateOf<RingFingerPose3D?>(null) }
     var fingerOccluderMesh by remember { mutableStateOf<FingerOccluderMesh?>(null) }
+    var occluderDebugVisible by remember { mutableStateOf<Boolean?>(null) }
     var renderState3D by remember { mutableStateOf<com.handtryon.coreengine.model.TryOnRenderState3D?>(null) }
 
     LaunchedEffect(cameraStream) {
@@ -83,6 +85,7 @@ fun ArTryOnScene(
             lastRenderablePlacement = null
             ringFingerPose = null
             fingerOccluderMesh = null
+            occluderDebugVisible = null
         }
     }
 
@@ -90,6 +93,7 @@ fun ArTryOnScene(
         childNodes.clear()
         ringNode = null
         occluderNode = null
+        occluderDebugVisible = null
         if (modelAssetPath.isNullOrBlank()) return@LaunchedEffect
 
         val node =
@@ -105,14 +109,15 @@ fun ArTryOnScene(
         }
     }
 
-    LaunchedEffect(handPose, measurement, glbSummary) {
+    LaunchedEffect(trackedHandFrame, measurement, glbSummary) {
+        val handPose = trackedHandFrame?.toHandPoseSnapshot()
         ringFingerPose = fingerPoseSolver.solve(handPose = handPose, measurement = measurement, glbSummary = glbSummary)
     }
 
-    LaunchedEffect(handPose, measurement, glbSummary, frameWidth, frameHeight, qualityScore, trackingState, updateAction) {
+    LaunchedEffect(trackedHandFrame, measurement, glbSummary, frameWidth, frameHeight, qualityScore, trackingState, updateAction) {
         renderState3D =
             renderStateFactory.create(
-                handPose = handPose,
+                trackedHandFrame = trackedHandFrame,
                 measurement = measurement,
                 glbSummary = glbSummary,
                 frameWidth = frameWidth,
@@ -134,7 +139,7 @@ fun ArTryOnScene(
             }
     }
 
-    LaunchedEffect(materialLoader, fingerOccluderMesh) {
+    LaunchedEffect(materialLoader, fingerOccluderMesh, debugFingerOccluderVisible) {
         val mesh = fingerOccluderMesh
         if (mesh == null) {
             occluderNode?.isVisible = false
@@ -142,8 +147,18 @@ fun ArTryOnScene(
         }
 
         val existingNode = occluderNode
-        if (existingNode == null) {
-            val material = depthOnlyMaterialFactory.create(materialLoader)
+        val shouldCreateNode = existingNode == null || occluderDebugVisible != debugFingerOccluderVisible
+        if (shouldCreateNode) {
+            existingNode?.let {
+                childNodes.remove(it)
+                occluderNode = null
+            }
+            val material =
+                if (debugFingerOccluderVisible) {
+                    depthOnlyMaterialFactory.createDebugVisible(materialLoader)
+                } else {
+                    depthOnlyMaterialFactory.create(materialLoader)
+                }
             val node =
                 runCatching {
                     occluderNodeFactory.create(
@@ -157,6 +172,7 @@ fun ArTryOnScene(
 
             if (node != null) {
                 occluderNode = node
+                occluderDebugVisible = debugFingerOccluderVisible
                 childNodes.add(0, node)
             }
         } else {

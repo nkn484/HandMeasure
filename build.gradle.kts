@@ -48,3 +48,17 @@ subprojects {
         }
     }
 }
+
+tasks.register<Exec>("tryOnReplayValidation") {
+    workingDir = rootDir
+    commandLine(
+        "python",
+        "tools/tryon/replay_validation.py",
+        "--annotations",
+        "validation/tryon/reference-annotations/real-screenshots-2026-04-29.json",
+        "--image-dir",
+        "validation/tryon/reference-images",
+        "--report-dir",
+        "validation/tryon/reports",
+    )
+}

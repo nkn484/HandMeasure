@@ -15,6 +15,14 @@ class DepthOnlyMaterialFactory(
             createTransparentFallback(materialLoader)
         }
 
+    fun createDebugVisible(materialLoader: MaterialLoader): MaterialInstance =
+        materialLoader.createColorInstance(
+            DEBUG_OCCLUDER_COLOR,
+            MATERIAL_METALLIC,
+            MATERIAL_ROUGHNESS,
+            MATERIAL_REFLECTANCE,
+        )
+
     private fun createTransparentFallback(materialLoader: MaterialLoader): MaterialInstance =
         materialLoader.createColorInstance(
             transparentColor,
@@ -28,5 +36,6 @@ class DepthOnlyMaterialFactory(
         const val MATERIAL_METALLIC = 0f
         const val MATERIAL_ROUGHNESS = 1f
         const val MATERIAL_REFLECTANCE = 0f
+        const val DEBUG_OCCLUDER_COLOR = 0x6633FF55
     }
 }

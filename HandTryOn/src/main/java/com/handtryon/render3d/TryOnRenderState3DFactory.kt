@@ -3,27 +3,28 @@ package com.handtryon.render3d
 import com.handtryon.coreengine.RingFitSolver
 import com.handtryon.coreengine.RingFingerPoseSolver
 import com.handtryon.coreengine.RingTryOnRenderStateResolver
-import com.handtryon.coreengine.model.TryOnHandPoseSnapshot as CoreHandPoseSnapshot
 import com.handtryon.coreengine.model.TryOnInputQuality as CoreInputQuality
-import com.handtryon.coreengine.model.TryOnLandmarkPoint
 import com.handtryon.coreengine.model.TryOnMeasurementSnapshot as CoreMeasurementSnapshot
 import com.handtryon.coreengine.model.TryOnRenderState3D
 import com.handtryon.coreengine.model.TryOnTrackingState as CoreTrackingState
 import com.handtryon.coreengine.model.TryOnUpdateAction as CoreUpdateAction
 import com.handtryon.domain.GlbAssetSummary
-import com.handtryon.domain.HandPoseSnapshot
 import com.handtryon.domain.MeasurementSnapshot
 import com.handtryon.domain.TryOnTrackingState
 import com.handtryon.domain.TryOnUpdateAction
+import com.handtryon.tracking.TrackedHandFrame
+import com.handtryon.tracking.TrackedHandFrameMapper
+import com.handtryon.tracking.TrackingFrameQualityPolicy
 import kotlin.math.max
 
 class TryOnRenderState3DFactory(
     private val poseSolver: RingFingerPoseSolver = RingFingerPoseSolver(),
     private val fitSolver: RingFitSolver = RingFitSolver(),
     private val renderStateResolver: RingTryOnRenderStateResolver = RingTryOnRenderStateResolver(),
+    private val trackingQualityPolicy: TrackingFrameQualityPolicy = TrackingFrameQualityPolicy(),
 ) {
     fun create(
-        handPose: HandPoseSnapshot?,
+        trackedHandFrame: TrackedHandFrame?,
         measurement: MeasurementSnapshot?,
         glbSummary: GlbAssetSummary?,
         frameWidth: Int,
@@ -32,7 +33,9 @@ class TryOnRenderState3DFactory(
         trackingState: TryOnTrackingState,
         updateAction: TryOnUpdateAction,
     ): TryOnRenderState3D? {
-        val corePose = poseSolver.solve(handPose.toCorePose()) ?: return null
+        if (trackingQualityPolicy.rejectReason(trackedHandFrame) != null) return null
+        val frame = trackedHandFrame ?: return null
+        val corePose = poseSolver.solve(TrackedHandFrameMapper.toCorePose(frame)) ?: return null
         val coreMeasurement = measurement.toCoreMeasurement()
         val fit =
             fitSolver.solve(
@@ -58,17 +61,6 @@ class TryOnRenderState3DFactory(
             frameHeight = frameHeight,
         )
     }
-
-    private fun HandPoseSnapshot?.toCorePose(): CoreHandPoseSnapshot? =
-        this?.let { pose ->
-            CoreHandPoseSnapshot(
-                frameWidth = pose.frameWidth,
-                frameHeight = pose.frameHeight,
-                landmarks = pose.landmarks.map { point -> TryOnLandmarkPoint(point.x, point.y, point.z) },
-                confidence = pose.confidence,
-                timestampMs = pose.timestampMs,
-            )
-        }
 
     private fun MeasurementSnapshot?.toCoreMeasurement(): CoreMeasurementSnapshot? =
         this?.let { measurement ->
