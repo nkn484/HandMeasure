@@ -33,6 +33,13 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    sourceSets {
+        getByName("androidTest").assets.srcDirs(
+            "$rootDir/validation/tryon/reference-images",
+            "$rootDir/validation/tryon/reference-annotations",
+        )
+    }
 }
 
 dependencies {
@@ -58,4 +65,9 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation(project(":handtryon-core"))
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:core-ktx:1.6.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("com.google.truth:truth:1.4.4")
 }

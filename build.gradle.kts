@@ -76,3 +76,7 @@ tasks.register<Exec>("tryOnVideoReplayValidation") {
         "validation/tryon/reports",
     )
 }
+
+tasks.register("tryOnAndroidReplayValidation") {
+    dependsOn(":app:connectedDebugAndroidTest")
+}

@@ -96,6 +96,10 @@ def normalize_degrees(value: float) -> float:
     return abs(normalized)
 
 
+def normalize_axis_degrees(value: float) -> float:
+    return min(normalize_degrees(value), normalize_degrees(value + 180.0))
+
+
 def media_file_for_frame(frame: dict[str, Any], media: dict[str, Any] | None) -> str:
     return str(frame.get("file") or (media or {}).get("file") or "")
 
@@ -253,7 +257,7 @@ def row_for_frame(
 
     center_error = math.hypot(prediction.center_x - expected.center_x, prediction.center_y - expected.center_y)
     width_error = abs(prediction.width_px - expected.width_px)
-    rotation_error = normalize_degrees(prediction.rotation_deg - expected.rotation_deg)
+    rotation_error = normalize_axis_degrees(prediction.rotation_deg - expected.rotation_deg)
     passed = (
         center_error <= center_threshold_px
         and width_error <= width_threshold_px
