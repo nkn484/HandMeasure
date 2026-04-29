@@ -35,7 +35,7 @@ class RingFitSolver(
             when {
                 measuredFingerWidth != null && measuredDiameter != null ->
                     fingerPose.fingerWidthPx * (measuredDiameter / measuredFingerWidth).coerceIn(MIN_WIDTH_RATIO, MAX_WIDTH_RATIO)
-                else -> fingerPose.fingerWidthPx * VISUAL_RING_TO_FINGER_WIDTH_RATIO
+                else -> fingerPose.fingerWidthPx * visualRingToFingerWidthRatio(fingerPose.fingerWidthPx)
             }.coerceAtLeast(MIN_TARGET_WIDTH_PX)
         val depthMeters =
             (virtualFocalPx * ringOuterDiameterMm / targetWidthPx.coerceAtLeast(1f) / MILLIMETERS_PER_METER)
@@ -68,12 +68,23 @@ class RingFitSolver(
             .takeIf { it >= MIN_TARGET_WIDTH_PX }
             ?.let { defaultRingDiameterMm }
 
+    private fun visualRingToFingerWidthRatio(fingerWidthPx: Float): Float =
+        (
+            VISUAL_RING_TO_FINGER_WIDTH_BASE_RATIO -
+                (fingerWidthPx - VISUAL_RING_REFERENCE_FINGER_WIDTH_PX) * VISUAL_RING_WIDTH_TAPER_PER_PX
+        )
+            .coerceIn(MIN_VISUAL_RING_TO_FINGER_WIDTH_RATIO, MAX_VISUAL_RING_TO_FINGER_WIDTH_RATIO)
+
     private companion object {
         const val DEFAULT_RING_DIAMETER_MM = 20.4f
         const val DEFAULT_DEPTH_METERS = 0.42f
         const val DEFAULT_VIRTUAL_FOCAL_PX = 930f
         const val MILLIMETERS_PER_METER = 1000f
-        const val VISUAL_RING_TO_FINGER_WIDTH_RATIO = 1.18f
+        const val VISUAL_RING_TO_FINGER_WIDTH_BASE_RATIO = 0.36f
+        const val VISUAL_RING_REFERENCE_FINGER_WIDTH_PX = 200f
+        const val VISUAL_RING_WIDTH_TAPER_PER_PX = 0.001f
+        const val MIN_VISUAL_RING_TO_FINGER_WIDTH_RATIO = 0.22f
+        const val MAX_VISUAL_RING_TO_FINGER_WIDTH_RATIO = 0.46f
         const val MIN_WIDTH_RATIO = 0.72f
         const val MAX_WIDTH_RATIO = 1.45f
         const val MIN_TARGET_WIDTH_PX = 18f

@@ -45,7 +45,44 @@ class RingFitSolverTest {
         assertThat(fit.ringOuterDiameterMm).isEqualTo(21.2f)
     }
 
-    private fun pose(): RingFingerPose =
+    @Test
+    fun solve_visualEstimateKeepsRingWidthNearFingerBaseBand() {
+        val fit =
+            RingFitSolver().solve(
+                fingerPose = pose(),
+                measurement = null,
+                modelWidthMm = 20.4f,
+            )
+
+        assertThat(fit.source).isEqualTo(RingFitSource.VisualEstimate)
+        assertThat(fit.targetWidthPx).isWithin(0.001f).of(33.12f)
+    }
+
+    @Test
+    fun solve_visualEstimateTapersWideNearCameraFinger() {
+        val fit =
+            RingFitSolver().solve(
+                fingerPose = pose(fingerWidthPx = 268f),
+                measurement = null,
+                modelWidthMm = 20.4f,
+            )
+
+        assertThat(fit.targetWidthPx).isWithin(0.001f).of(78.256f)
+    }
+
+    @Test
+    fun solve_visualEstimateExpandsSmallFarCameraFinger() {
+        val fit =
+            RingFitSolver().solve(
+                fingerPose = pose(fingerWidthPx = 107f),
+                measurement = null,
+                modelWidthMm = 20.4f,
+            )
+
+        assertThat(fit.targetWidthPx).isWithin(0.001f).of(48.471f)
+    }
+
+    private fun pose(fingerWidthPx: Float = 72f): RingFingerPose =
         RingFingerPose(
             centerPx = TryOnPoint2(540f, 720f),
             occluderStartPx = TryOnPoint2(540f, 650f),
@@ -54,7 +91,7 @@ class RingFitSolverTest {
             normalHintPx = TryOnVec2(1f, 0f),
             rotationDegrees = 90f,
             rollDegrees = 0f,
-            fingerWidthPx = 72f,
+            fingerWidthPx = fingerWidthPx,
             confidence = 0.86f,
         )
 }

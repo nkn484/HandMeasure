@@ -2,6 +2,9 @@ package com.handmeasure.sample.tryon.validation
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.media.MediaMetadataRetriever
 import android.os.Build
 import androidx.test.core.app.ApplicationProvider
@@ -31,14 +34,39 @@ class TryOnVideoReplayInstrumentedTest {
     fun videoFixture_runsThroughMediaPipeAndRenderStatePipeline() {
         val targetContext = ApplicationProvider.getApplicationContext<Context>()
         val testAssets = InstrumentationRegistry.getInstrumentation().context.assets
-        val annotation = JSONObject(testAssets.open(ANNOTATION_ASSET).bufferedReader().use { it.readText() })
-        val media = annotation.getJSONObject("media")
-        val videoAsset = media.getString("file")
         val reportDir = File(targetContext.getExternalFilesDir(null), "tryon_replay").apply { mkdirs() }
-        val reportFile = File(reportDir, "video-fixture-2026-04-29-android-report.json")
-        val frameRows = JSONArray()
         val renderer = TryOnRenderState3DFactory()
         val handEngine = MediaPipeHandLandmarkEngine(targetContext)
+
+        try {
+            for (annotationAsset in ANNOTATION_ASSETS) {
+                runFixture(
+                    annotationAsset = annotationAsset,
+                    testAssets = testAssets,
+                    reportDir = reportDir,
+                    handEngine = handEngine,
+                    renderer = renderer,
+                )
+            }
+        } finally {
+            handEngine.close()
+        }
+    }
+
+    private fun runFixture(
+        annotationAsset: String,
+        testAssets: android.content.res.AssetManager,
+        reportDir: File,
+        handEngine: MediaPipeHandLandmarkEngine,
+        renderer: TryOnRenderState3DFactory,
+    ) {
+        val annotation = JSONObject(testAssets.open(annotationAsset).bufferedReader().use { it.readText() })
+        val media = annotation.getJSONObject("media")
+        val videoAsset = media.getString("file")
+        val fixtureName = annotationAsset.removeSuffix(".json")
+        val screenshotDir = File(reportDir, "$fixtureName-screenshots").apply { mkdirs() }
+        val reportFile = File(reportDir, "$fixtureName-android-report.json")
+        val frameRows = JSONArray()
         val retriever = MediaMetadataRetriever()
 
         try {
@@ -55,13 +83,13 @@ class TryOnVideoReplayInstrumentedTest {
                         bitmap = bitmap,
                         handEngine = handEngine,
                         renderer = renderer,
+                        screenshotDir = screenshotDir,
                     ),
                 )
                 bitmap?.recycle()
             }
         } finally {
             retriever.release()
-            handEngine.close()
         }
 
         val summary = summarize(frameRows)
@@ -69,7 +97,9 @@ class TryOnVideoReplayInstrumentedTest {
             JSONObject()
                 .put("schemaVersion", 1)
                 .put("source", "android_instrumented_mediapipe_replay")
+                .put("annotationAsset", annotationAsset)
                 .put("media", media)
+                .put("screenshotDir", screenshotDir.absolutePath)
                 .put("summary", summary)
                 .put("frames", frameRows)
         reportFile.writeText(report.toString(2), Charsets.UTF_8)
@@ -84,6 +114,7 @@ class TryOnVideoReplayInstrumentedTest {
         bitmap: Bitmap?,
         handEngine: MediaPipeHandLandmarkEngine,
         renderer: TryOnRenderState3DFactory,
+        screenshotDir: File,
     ): JSONObject {
         val visibleFinger = expectedFrame.getBoolean("visibleFinger")
         if (bitmap == null) {
@@ -111,10 +142,17 @@ class TryOnVideoReplayInstrumentedTest {
                 }
 
         if (renderState == null) {
+            saveReplayOverlay(
+                source = bitmap,
+                expectedFrame = expectedFrame,
+                predicted = null,
+                output = File(screenshotDir, "frame_${expectedFrame.getInt("frameIndex").toString().padStart(6, '0')}.png"),
+            )
             return baseRow(expectedFrame, visibleFinger)
                 .put("status", "no_render_state")
                 .put("pass", !visibleFinger)
                 .put("confidence", detection?.confidence ?: 0.0)
+                .put("debugLandmarks", detection?.debugRingFingerLandmarks() ?: JSONObject())
                 .put("reason", if (visibleFinger) "No render state for visible ring finger" else "Correctly hidden")
         }
 
@@ -135,6 +173,18 @@ class TryOnVideoReplayInstrumentedTest {
                     rotationError <= ROTATION_THRESHOLD_DEGREES
             }
 
+        saveReplayOverlay(
+            source = bitmap,
+            expectedFrame = expectedFrame,
+            predicted =
+                PredictedZone(
+                    centerX = renderState.fingerPose.centerPx.x,
+                    centerY = renderState.fingerPose.centerPx.y,
+                    widthPx = renderState.fitState.targetWidthPx,
+                ),
+            output = File(screenshotDir, "frame_${expectedFrame.getInt("frameIndex").toString().padStart(6, '0')}.png"),
+        )
+
         return baseRow(expectedFrame, visibleFinger)
             .put("status", "measured")
             .put("pass", pass)
@@ -146,8 +196,82 @@ class TryOnVideoReplayInstrumentedTest {
                 .put("centerX", renderState.fingerPose.centerPx.x.toDouble())
                 .put("centerY", renderState.fingerPose.centerPx.y.toDouble())
                 .put("widthPx", renderState.fitState.targetWidthPx.toDouble())
-                .put("rotationDeg", renderState.fingerPose.rotationDegrees.toDouble()))
+                .put("rotationDeg", renderState.fingerPose.rotationDegrees.toDouble())
+                .put("fingerWidthPx", renderState.fingerPose.fingerWidthPx.toDouble())
+                .put("normalHintX", renderState.fingerPose.normalHintPx.x.toDouble())
+                .put("normalHintY", renderState.fingerPose.normalHintPx.y.toDouble()))
+            .put("debugLandmarks", detection.debugRingFingerLandmarks())
             .put("reason", if (pass) "" else if (!visibleFinger) "Unexpected render state for hidden ring finger" else "Metric exceeded threshold")
+    }
+
+    private fun HandDetection.debugRingFingerLandmarks(): JSONObject {
+        if (imageLandmarks.size <= RING_DIP_INDEX) return JSONObject()
+        val mcp = imageLandmarks[RING_MCP_INDEX]
+        val pip = imageLandmarks[RING_PIP_INDEX]
+        val dip = imageLandmarks[RING_DIP_INDEX]
+        val mcpPipLength = hypot((pip.x - mcp.x).toDouble(), (pip.y - mcp.y).toDouble())
+        val pipDipLength = hypot((dip.x - pip.x).toDouble(), (dip.y - pip.y).toDouble())
+        val mcpDipLength = hypot((dip.x - mcp.x).toDouble(), (dip.y - mcp.y).toDouble())
+        return JSONObject()
+            .put("handedness", handedness)
+            .put("ringMcp", mcp.toJson())
+            .put("ringPip", pip.toJson())
+            .put("ringDip", dip.toJson())
+            .put("mcpPipLengthPx", mcpPipLength)
+            .put("pipDipLengthPx", pipDipLength)
+            .put("mcpDipLengthPx", mcpDipLength)
+            .put("extensionRatio", mcpDipLength / (mcpPipLength + pipDipLength).coerceAtLeast(1e-4))
+    }
+
+    private fun com.handmeasure.vision.Landmark2D.toJson(): JSONObject =
+        JSONObject()
+            .put("x", x.toDouble())
+            .put("y", y.toDouble())
+            .put("z", z.toDouble())
+
+    private fun saveReplayOverlay(
+        source: Bitmap,
+        expectedFrame: JSONObject,
+        predicted: PredictedZone?,
+        output: File,
+    ) {
+        val bitmap = source.copy(Bitmap.Config.ARGB_8888, true)
+        val canvas = Canvas(bitmap)
+        val expected = expectedFrame.getJSONObject("ringFingerZone")
+        val paint =
+            Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = 5f
+                textSize = 28f
+            }
+        val textPaint =
+            Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                textSize = 28f
+                style = Paint.Style.FILL
+            }
+        if (expectedFrame.getBoolean("visibleFinger")) {
+            paint.color = Color.GREEN
+            val expectedRadius = expected.getDouble("widthPx").toFloat() * 0.5f
+            val expectedX = expected.getDouble("centerX").toFloat()
+            val expectedY = expected.getDouble("centerY").toFloat()
+            canvas.drawCircle(expectedX, expectedY, expectedRadius, paint)
+            canvas.drawText("expected", expectedX + expectedRadius + 8f, expectedY, textPaint)
+        } else {
+            paint.color = Color.YELLOW
+            canvas.drawRect(16f, 16f, 260f, 74f, paint)
+            canvas.drawText("expected hide", 26f, 54f, textPaint)
+        }
+        if (predicted != null) {
+            paint.color = Color.RED
+            val predictedRadius = predicted.widthPx * 0.5f
+            canvas.drawCircle(predicted.centerX, predicted.centerY, predictedRadius, paint)
+            canvas.drawText("predicted", predicted.centerX + predictedRadius + 8f, predicted.centerY, textPaint)
+        }
+        output.outputStream().use { stream ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+        }
+        bitmap.recycle()
     }
 
     private fun baseRow(
@@ -209,6 +333,12 @@ class TryOnVideoReplayInstrumentedTest {
             .put("falsePositiveHiddenFrames", falsePositiveHidden)
     }
 
+    private data class PredictedZone(
+        val centerX: Float,
+        val centerY: Float,
+        val widthPx: Float,
+    )
+
     private fun normalizeDegrees(value: Double): Double {
         val normalized = (value + 180.0) % 360.0 - 180.0
         return abs(normalized)
@@ -218,10 +348,18 @@ class TryOnVideoReplayInstrumentedTest {
         minOf(normalizeDegrees(value), normalizeDegrees(value + 180.0))
 
     private companion object {
-        const val ANNOTATION_ASSET = "video-fixture-2026-04-29.json"
+        val ANNOTATION_ASSETS =
+            listOf(
+                "video-fixture-2026-04-29.json",
+                "video-fixture2-2026-04-29.json",
+                "video-fixture3-2026-04-29.json",
+            )
         const val MICROSECONDS_PER_SECOND = 1_000_000.0
         const val CENTER_THRESHOLD_PX = 24.0
         const val WIDTH_THRESHOLD_PX = 14.0
         const val ROTATION_THRESHOLD_DEGREES = 18.0
+        const val RING_MCP_INDEX = 13
+        const val RING_PIP_INDEX = 14
+        const val RING_DIP_INDEX = 15
     }
 }
