@@ -62,3 +62,17 @@ tasks.register<Exec>("tryOnReplayValidation") {
         "validation/tryon/reports",
     )
 }
+
+tasks.register<Exec>("tryOnVideoReplayValidation") {
+    workingDir = rootDir
+    commandLine(
+        "python",
+        "tools/tryon/replay_validation.py",
+        "--annotations",
+        "validation/tryon/reference-annotations/video-fixture-2026-04-29.json",
+        "--image-dir",
+        "validation/tryon/reference-images",
+        "--report-dir",
+        "validation/tryon/reports",
+    )
+}

@@ -12,10 +12,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import cv2
+
 
 DEFAULT_CENTER_THRESHOLD_PX = 24.0
 DEFAULT_WIDTH_THRESHOLD_PX = 14.0
 DEFAULT_ROTATION_THRESHOLD_DEG = 18.0
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"}
 
 
 @dataclass(frozen=True)
@@ -62,7 +65,7 @@ def load_predictions(path: Path | None) -> dict[str, Prediction]:
         zone = frame.get("predictedRingFingerZone") or frame.get("prediction")
         if not zone:
             continue
-        predictions[str(frame["file"])] = Prediction(
+        predictions[prediction_key(str(frame["file"]), frame.get("frameIndex"))] = Prediction(
             center_x=float(zone["centerX"]),
             center_y=float(zone["centerY"]),
             width_px=float(zone["widthPx"]),
@@ -70,6 +73,12 @@ def load_predictions(path: Path | None) -> dict[str, Prediction]:
             confidence=float(zone.get("confidence", frame.get("confidence", 0.0))),
         )
     return predictions
+
+
+def prediction_key(file_name: str, frame_index: Any = None) -> str:
+    if frame_index is None:
+        return file_name
+    return f"{file_name}#{int(frame_index)}"
 
 
 def expected_zone(frame: dict[str, Any]) -> ExpectedZone:
@@ -87,39 +96,154 @@ def normalize_degrees(value: float) -> float:
     return abs(normalized)
 
 
+def media_file_for_frame(frame: dict[str, Any], media: dict[str, Any] | None) -> str:
+    return str(frame.get("file") or (media or {}).get("file") or "")
+
+
+def is_video_file(path: Path, media: dict[str, Any] | None) -> bool:
+    media_type = str((media or {}).get("type", "")).lower()
+    return media_type == "video" or path.suffix.lower() in VIDEO_EXTENSIONS
+
+
+def read_fixture_frame(
+    image_dir: Path,
+    file_name: str,
+    frame_index: int | None,
+    media: dict[str, Any] | None,
+) -> tuple[Path, Any | None, str]:
+    fixture_path = image_dir / file_name
+    if not fixture_path.exists():
+        return fixture_path, None, "missing_fixture"
+    if is_video_file(fixture_path, media):
+        if frame_index is None:
+            return fixture_path, None, "missing_frame_index"
+        cap = cv2.VideoCapture(str(fixture_path))
+        if not cap.isOpened():
+            return fixture_path, None, "unreadable_video"
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if frame_index < 0 or frame_index >= frame_count:
+            cap.release()
+            return fixture_path, None, "frame_index_out_of_range"
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+        ok, frame_image = cap.read()
+        cap.release()
+        return fixture_path, frame_image if ok else None, "ok" if ok else "unreadable_frame"
+
+    frame_image = cv2.imread(str(fixture_path), cv2.IMREAD_COLOR)
+    return fixture_path, frame_image, "ok" if frame_image is not None else "unreadable_image"
+
+
+def assess_annotation_quality(
+    frame: dict[str, Any],
+    frame_image: Any | None,
+    frame_width: int,
+    frame_height: int,
+) -> dict[str, Any]:
+    visible_finger = bool(frame.get("visibleFinger", True))
+    declared_quality = str(frame.get("annotationQuality", "")).lower()
+    zone = expected_zone(frame)
+    zone_inside = (
+        0 <= zone.center_x <= frame_width
+        and 0 <= zone.center_y <= frame_height
+        and 0 <= zone.width_px <= max(frame_width, frame_height)
+    )
+    zone_present = zone.width_px > 0 and zone.center_x > 0 and zone.center_y > 0
+    notes: list[str] = []
+
+    if visible_finger and not zone_present:
+        notes.append("visible_frame_missing_ring_zone")
+    if not visible_finger and zone_present:
+        notes.append("hidden_frame_has_ring_zone")
+    if not zone_inside:
+        notes.append("ring_zone_outside_frame")
+
+    brightness = contrast = sharpness = None
+    if frame_image is not None:
+        gray = cv2.cvtColor(frame_image, cv2.COLOR_BGR2GRAY)
+        brightness = float(gray.mean())
+        contrast = float(gray.std())
+        sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+        if brightness < 55:
+            notes.append("frame_too_dark")
+        if brightness > 215:
+            notes.append("frame_too_bright")
+        if contrast < 18:
+            notes.append("low_contrast")
+        if sharpness < 90:
+            notes.append("motion_blur_or_soft_frame")
+    else:
+        notes.append("frame_not_read")
+
+    if visible_finger and zone_present and zone.width_px < 35:
+        notes.append("ring_zone_width_too_small")
+    if visible_finger and zone_present and zone.width_px > frame_width * 0.35:
+        notes.append("ring_zone_width_too_large")
+    if declared_quality in {"medium", "challenging"}:
+        notes.append(f"manual_quality_{declared_quality}")
+
+    status = "good" if not notes else "review"
+    if "frame_not_read" in notes or "ring_zone_outside_frame" in notes or "visible_frame_missing_ring_zone" in notes:
+        status = "bad"
+
+    return {
+        "annotationQualityStatus": status,
+        "declaredAnnotationQuality": frame.get("annotationQuality"),
+        "annotationQualityNotes": notes,
+        "brightnessMean": round(brightness, 2) if brightness is not None else None,
+        "contrastStd": round(contrast, 2) if contrast is not None else None,
+        "laplacianSharpness": round(sharpness, 2) if sharpness is not None else None,
+    }
+
+
 def row_for_frame(
     frame: dict[str, Any],
+    media: dict[str, Any] | None,
     image_dir: Path,
     predictions: dict[str, Prediction],
     center_threshold_px: float,
     width_threshold_px: float,
     rotation_threshold_deg: float,
 ) -> dict[str, Any]:
-    file_name = str(frame["file"])
-    image_path = image_dir / file_name
+    file_name = media_file_for_frame(frame, media)
+    frame_index = frame.get("frameIndex")
+    image_path, frame_image, read_status = read_fixture_frame(
+        image_dir=image_dir,
+        file_name=file_name,
+        frame_index=int(frame_index) if frame_index is not None else None,
+        media=media,
+    )
     visible_finger = bool(frame.get("visibleFinger", True))
     expected = expected_zone(frame)
+    frame_width = int((media or {}).get("frameWidth") or frame.get("frameWidth") or (frame_image.shape[1] if frame_image is not None else 0))
+    frame_height = int((media or {}).get("frameHeight") or frame.get("frameHeight") or (frame_image.shape[0] if frame_image is not None else 0))
+    quality = assess_annotation_quality(frame, frame_image, frame_width, frame_height)
 
-    if not image_path.exists():
+    base_row = {
+        "file": file_name,
+        "frameIndex": frame_index,
+        "timeSec": frame.get("timeSec"),
+        "visibleFinger": visible_finger,
+        **quality,
+    }
+
+    if read_status != "ok":
         return {
-            "file": file_name,
-            "status": "missing_fixture",
+            **base_row,
+            "status": read_status,
             "pass": False,
-            "visibleFinger": visible_finger,
             "centerErrorPx": None,
             "widthErrorPx": None,
             "rotationErrorDeg": None,
             "confidence": 0.0,
-            "reason": f"Missing input image: {image_path}",
+            "reason": f"Fixture frame is not readable: {image_path} ({read_status})",
         }
 
-    prediction = predictions.get(file_name)
+    prediction = predictions.get(prediction_key(file_name, frame_index))
     if prediction is None:
         return {
-            "file": file_name,
+            **base_row,
             "status": "missing_prediction",
             "pass": False,
-            "visibleFinger": visible_finger,
             "centerErrorPx": None,
             "widthErrorPx": None,
             "rotationErrorDeg": None,
@@ -137,10 +261,9 @@ def row_for_frame(
     )
 
     return {
-        "file": file_name,
+        **base_row,
         "status": "measured",
         "pass": passed,
-        "visibleFinger": visible_finger,
         "centerErrorPx": round(center_error, 4),
         "widthErrorPx": round(width_error, 4),
         "rotationErrorDeg": round(rotation_error, 4),
@@ -152,9 +275,17 @@ def row_for_frame(
 def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     fieldnames = [
         "file",
+        "frameIndex",
+        "timeSec",
         "status",
         "pass",
         "visibleFinger",
+        "annotationQualityStatus",
+        "declaredAnnotationQuality",
+        "annotationQualityNotes",
+        "brightnessMean",
+        "contrastStd",
+        "laplacianSharpness",
         "centerErrorPx",
         "widthErrorPx",
         "rotationErrorDeg",
@@ -173,10 +304,12 @@ def main() -> int:
     args.report_dir.mkdir(parents=True, exist_ok=True)
 
     annotations = load_json(args.annotations)
+    media = annotations.get("media")
     predictions = load_predictions(args.predictions)
     rows = [
         row_for_frame(
             frame=frame,
+            media=media,
             image_dir=args.image_dir,
             predictions=predictions,
             center_threshold_px=args.center_threshold_px,
@@ -187,13 +320,27 @@ def main() -> int:
     ]
     measured_rows = [row for row in rows if row["status"] == "measured"]
     missing_rows = [row for row in rows if row["status"] == "missing_fixture"]
+    missing_prediction_rows = [row for row in rows if row["status"] == "missing_prediction"]
+    bad_annotation_rows = [row for row in rows if row["annotationQualityStatus"] == "bad"]
+    review_annotation_rows = [row for row in rows if row["annotationQualityStatus"] == "review"]
     failed_rows = [row for row in rows if not row["pass"]]
-    overall_status = "missing_fixtures" if missing_rows else "failed" if failed_rows else "passed"
+    overall_status = (
+        "missing_fixtures"
+        if missing_rows
+        else "bad_annotations"
+        if bad_annotation_rows
+        else "awaiting_predictions"
+        if missing_prediction_rows and not measured_rows
+        else "failed"
+        if failed_rows
+        else "passed"
+    )
     report = {
         "schemaVersion": 1,
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "annotationFile": str(args.annotations),
         "imageDir": str(args.image_dir),
+        "media": media,
         "pipeline": [
             "image_or_video_frame",
             "mediapipe_landmarks",
@@ -213,13 +360,17 @@ def main() -> int:
             "totalFrames": len(rows),
             "measuredFrames": len(measured_rows),
             "missingFixtures": len(missing_rows),
+            "missingPredictions": len(missing_prediction_rows),
+            "badAnnotationFrames": len(bad_annotation_rows),
+            "reviewAnnotationFrames": len(review_annotation_rows),
             "failedFrames": len(failed_rows),
         },
         "frames": rows,
     }
 
-    json_path = args.report_dir / "real-screenshots-2026-04-29-report.json"
-    csv_path = args.report_dir / "real-screenshots-2026-04-29-report.csv"
+    report_name = args.annotations.stem
+    json_path = args.report_dir / f"{report_name}-report.json"
+    csv_path = args.report_dir / f"{report_name}-report.csv"
     with json_path.open("w", encoding="utf-8") as handle:
         json.dump(report, handle, indent=2, ensure_ascii=False)
         handle.write("\n")

@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "source": "manual_annotations_from_video_fixture",
+  "media": {
+    "file": "video_fixture.mp4",
+    "type": "video",
+    "frameWidth": 720,
+    "frameHeight": 1280,
+    "fps": 30.056
+  },
+  "frames": [
+    {
+      "frameIndex": 0,
+      "timeSec": 0.0,
+      "ringFingerZone": {
+        "centerX": 292,
+        "centerY": 545,
+        "widthPx": 72,
+        "rotationDeg": 88
+      },
+      "visibleFinger": true,
+      "annotationQuality": "good",
+      "notes": ["open_hand", "dorsal", "ring_finger_clear", "manual_ground_truth_v1"]
+    },
+    {
+      "frameIndex": 130,
+      "timeSec": 4.325,
+      "ringFingerZone": {
+        "centerX": 220,
+        "centerY": 620,
+        "widthPx": 74,
+        "rotationDeg": 87
+      },
+      "visibleFinger": true,
+      "annotationQuality": "good",
+      "notes": ["open_hand", "dorsal", "ring_finger_clear", "manual_ground_truth_v1"]
+    },
+    {
+      "frameIndex": 260,
+      "timeSec": 8.651,
+      "ringFingerZone": {
+        "centerX": 0,
+        "centerY": 0,
+        "widthPx": 0,
+        "rotationDeg": 0
+      },
+      "visibleFinger": false,
+      "annotationQuality": "challenging",
+      "notes": ["curled_fingers", "ring_finger_not_fit_ready", "expect_hide_or_hold"]
+    },
+    {
+      "frameIndex": 391,
+      "timeSec": 13.009,
+      "ringFingerZone": {
+        "centerX": 0,
+        "centerY": 0,
+        "widthPx": 0,
+        "rotationDeg": 0
+      },
+      "visibleFinger": false,
+      "annotationQuality": "good_negative",
+      "notes": ["fist", "ring_finger_hidden", "expect_hide"]
+    },
+    {
+      "frameIndex": 521,
+      "timeSec": 17.335,
+      "ringFingerZone": {
+        "centerX": 250,
+        "centerY": 650,
+        "widthPx": 72,
+        "rotationDeg": 88
+      },
+      "visibleFinger": true,
+      "annotationQuality": "good",
+      "notes": ["open_hand", "dorsal", "ring_finger_clear", "manual_ground_truth_v1"]
+    },
+    {
+      "frameIndex": 651,
+      "timeSec": 21.66,
+      "ringFingerZone": {
+        "centerX": 290,
+        "centerY": 585,
+        "widthPx": 82,
+        "rotationDeg": 76
+      },
+      "visibleFinger": true,
+      "annotationQuality": "medium",
+      "notes": ["open_hand", "dorsal", "near_camera", "slight_motion_blur", "manual_ground_truth_v1"]
+    }
+  ]
+}
