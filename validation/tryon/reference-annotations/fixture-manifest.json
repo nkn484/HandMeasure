@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "fixtures": [
+    {
+      "fixtureId": "video-fixture-2026-04-29",
+      "mediaFile": "video_fixture.mp4",
+      "annotationFile": "video-fixture-2026-04-29.json",
+      "deviceModel": "Xiaomi wireless-debug device",
+      "androidVersion": "unknown",
+      "lightingBucket": "indoor_mixed",
+      "backgroundBucket": "neutral_indoor",
+      "handSkinBucket": "anonymous_bucket_unknown",
+      "poseBucket": "front_near_open_hand",
+      "expectedDifficulty": "medium",
+      "tags": ["baseline", "near", "open_hand"]
+    },
+    {
+      "fixtureId": "video-fixture2-2026-04-29",
+      "mediaFile": "video_fixture2.mp4",
+      "annotationFile": "video-fixture2-2026-04-29.json",
+      "deviceModel": "Xiaomi wireless-debug device",
+      "androidVersion": "unknown",
+      "lightingBucket": "indoor_mixed",
+      "backgroundBucket": "neutral_indoor",
+      "handSkinBucket": "anonymous_bucket_unknown",
+      "poseBucket": "left_right_oblique_mixed_distance",
+      "expectedDifficulty": "hard",
+      "tags": ["rotation", "oblique", "far_near"]
+    },
+    {
+      "fixtureId": "video-fixture3-2026-04-29",
+      "mediaFile": "video_fixture3.mp4",
+      "annotationFile": "video-fixture3-2026-04-29.json",
+      "deviceModel": "Xiaomi wireless-debug device",
+      "androidVersion": "unknown",
+      "lightingBucket": "indoor_mixed",
+      "backgroundBucket": "neutral_indoor",
+      "handSkinBucket": "anonymous_bucket_unknown",
+      "poseBucket": "closed_fist_hidden_ring_finger",
+      "expectedDifficulty": "stress",
+      "tags": ["hidden_ring_finger", "fist", "occlusion", "reject_gate"]
+    }
+  ]
+}

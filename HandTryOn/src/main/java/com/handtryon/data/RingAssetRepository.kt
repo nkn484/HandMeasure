@@ -12,6 +12,7 @@ import com.handtryon.domain.IntBounds
 import com.handtryon.domain.NormalizedAssetMetadata
 import com.handtryon.domain.PointF
 import com.handtryon.domain.RingAssetSource
+import com.handtryon.validation.GlbMaterialRenderPolicy
 import org.json.JSONObject
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -42,7 +43,7 @@ class RingAssetLoader(
         val content =
             assetManager.open(metadataPath).bufferedReader().use { reader ->
                 reader.readText()
-        }
+            }
         return parseMetadata(content)
     }
 
@@ -131,6 +132,9 @@ class RingAssetLoader(
         if (scale.authoredWidthMm != null) notes += "authored_width_metadata"
         if (pivot != null) notes += "pivot_metadata"
         if (materials.isNotEmpty()) notes += "material_metadata"
+        val materialPolicy = GlbMaterialRenderPolicy().evaluate(materials)
+        notes += "material_profile_${materialPolicy.materialProfile}"
+        notes += materialPolicy.warnings.map { warning -> "material_warning_$warning" }
 
         return GlbAssetSummary(
             modelAssetPath = modelPath,

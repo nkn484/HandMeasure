@@ -50,4 +50,5 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("com.google.truth:truth:1.4.4")
+    testImplementation("org.json:json:20240303")
 }

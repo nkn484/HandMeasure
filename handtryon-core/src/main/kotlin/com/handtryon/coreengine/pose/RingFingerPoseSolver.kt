@@ -13,13 +13,30 @@ import kotlin.math.atan2
 import kotlin.math.sign
 import kotlin.math.sqrt
 
+/**
+ * Ring-finger pose thresholds used by the non-AR try-on renderer.
+ *
+ * Calibrated constants: minimum landmark geometry gates (`minAxisLengthPx`, `minFingerWidthPx`,
+ * `minConfidence`) and confidence normalizers are intentionally conservative runtime gates.
+ *
+ * Heuristic tuning: center buckets, oblique rotation buckets, and curled/hidden
+ * finger geometry gates are fixture-informed heuristics. The band center intentionally stays on
+ * the ring-finger shaft centerline instead of being offset into the gap between fingers. These
+ * constants should be recalibrated against a
+ * larger labeled dataset before being treated as production constants.
+ */
 data class RingFingerPoseSolverConfig(
     val minAxisLengthPx: Float = 9f,
     val minFingerWidthPx: Float = 18f,
     val minConfidence: Float = 0.22f,
     val landmarkWidthRatio: Float = 1.34f,
-    val defaultCenterOnMcpToPip: Float = 0.34f,
-    val midPalmCenterOnMcpToPip: Float = 0.30f,
+    val defaultCenterOnMcpToPip: Float = 0.78f,
+    val upperPalmCenterOnMcpToPip: Float = 0.34f,
+    val upperPalmNearCenterOnMcpToPip: Float = 0.72f,
+    val upperPalmNearMcpToPipMinPx: Float = 95f,
+    val midPalmCenterOnMcpToPip: Float = 0.34f,
+    val midPalmUpperCenterOnMcpToPip: Float = 0.80f,
+    val midPalmUpperYRatioMax: Float = 0.532f,
     val verticalCenterOnMcpToPip: Float = 0.64f,
     val midPalmYRatioMin: Float = 0.49f,
     val midPalmYRatioMax: Float = 0.56f,
@@ -27,9 +44,6 @@ data class RingFingerPoseSolverConfig(
     val verticalFingerLeanThreshold: Float = 0.12f,
     val lowerPalmVerticalYRatioMin: Float = 0.555f,
     val obliqueFingerLeanThreshold: Float = 0.28f,
-    val midPalmLateralRatio: Float = 0.16f,
-    val topPalmLateralRatio: Float = 0.32f,
-    val obliqueLateralRatio: Float = 0.23f,
     val occluderStartOnMcpToPip: Float = 0.18f,
     val occluderEndOnPipToDip: Float = 0.82f,
     val confidenceAxisNormalizerPx: Float = 90f,
@@ -54,6 +68,13 @@ data class RingFingerPoseSolverConfig(
     val minBendCosine: Float = 0.28f,
     val minDistalToProximalRatio: Float = 0.42f,
     val minForwardExtensionCosine: Float = 0.04f,
+    val minProximalFallbackAxisLengthPx: Float = 72f,
+    val minProximalFallbackForwardCosine: Float = 0.12f,
+    val proximalFallbackConfidenceMultiplier: Float = 0.72f,
+    val proximalFallbackCenterOnMcpToPip: Float = 0.80f,
+    val proximalFallbackNearVerticalCenterOnMcpToPip: Float = 0.90f,
+    val proximalFallbackNearVerticalLeanThreshold: Float = 0.22f,
+    val proximalFallbackOccluderEndOnMcpToPip: Float = 1.0f,
 )
 
 data class ObliqueRotationBucket(
@@ -96,6 +117,15 @@ class RingFingerPoseSolver(
             )
         val geometryRejectReason = rejectReasonForGeometry(geometryDiagnostics)
         if (geometryRejectReason != null) {
+            proximalFallback(
+                pose = pose,
+                mcp = mcp,
+                pip = pip,
+                mcpToPip = mcpToPip,
+                wristToMcp = vector(from = wrist, to = mcp),
+                diagnostics = geometryDiagnostics,
+                fallbackReason = geometryRejectReason,
+            )?.let { return it }
             return rejected(geometryRejectReason, geometryDiagnostics)
         }
 
@@ -123,12 +153,7 @@ class RingFingerPoseSolver(
                 frameHeight = pose.frameHeight,
             )
         val baseCenter = interpolate(mcp, pip, centerPolicy.centerOnMcpToPip)
-        val center =
-            TryOnLandmarkPoint(
-                x = baseCenter.x + normal.x * centerPolicy.lateralOffsetPx,
-                y = baseCenter.y + normal.y * centerPolicy.lateralOffsetPx,
-                z = baseCenter.z,
-            )
+        val center = baseCenter
         val rotation = adjustedRotation(tangent)
         val diagnostics =
             geometryDiagnostics.copy(
@@ -136,8 +161,11 @@ class RingFingerPoseSolver(
                 lateralOffsetPx = centerPolicy.lateralOffsetPx,
                 rawRotationDegrees = rotation.rawDegrees,
                 rotationCorrectionDegrees = rotation.correctionDegrees,
+                rotationCorrectionBucket = rotation.bucketName,
+                finalRotationDegrees = rotation.rotationDegrees,
                 rawConfidence = rawConfidence,
                 confidence = confidence,
+                centerPolicy = centerPolicy.policyName,
             )
         if (!isPointInsideFrame(center, pose.frameWidth, pose.frameHeight)) {
             return rejected(RingFingerPoseRejectReason.OutsideFrame, diagnostics)
@@ -170,6 +198,82 @@ class RingFingerPoseSolver(
                 RingFingerPoseRejectReason.FingerCurled
             else -> null
         }
+
+    private fun proximalFallback(
+        pose: TryOnHandPoseSnapshot,
+        mcp: TryOnLandmarkPoint,
+        pip: TryOnLandmarkPoint,
+        mcpToPip: CoreVec2,
+        wristToMcp: CoreVec2,
+        diagnostics: RingFingerPoseDiagnostics,
+        fallbackReason: RingFingerPoseRejectReason,
+    ): RingFingerPoseSolveResult? {
+        if (fallbackReason !in PROXIMAL_FALLBACK_REASONS) return null
+        val axisLength = mcpToPip.length
+        if (axisLength < config.minProximalFallbackAxisLengthPx) return null
+        if (diagnostics.forwardExtensionCosine < config.minProximalFallbackForwardCosine) return null
+
+        val tangent = mcpToPip.normalized()
+        if (tangent.dot(wristToMcp.normalized()) < config.minProximalFallbackForwardCosine) return null
+
+        val rollDegrees = estimateRollDegrees(pose)
+        val rawConfidence =
+            pose.confidence *
+                config.proximalFallbackConfidenceMultiplier *
+                (axisLength / config.confidenceAxisNormalizerPx).coerceIn(0.45f, 1f) *
+                (1f - abs(rollDegrees) / config.rollConfidenceNormalizerDegrees).coerceIn(0.62f, 1f)
+        val confidence = rawConfidence.coerceIn(0f, 1f)
+        if (confidence < config.minConfidence) return null
+
+        val centerOnMcpToPip =
+            if (abs(tangent.x) < config.proximalFallbackNearVerticalLeanThreshold) {
+                config.proximalFallbackNearVerticalCenterOnMcpToPip
+            } else {
+                config.proximalFallbackCenterOnMcpToPip
+            }
+        val center = interpolate(mcp, pip, centerOnMcpToPip)
+        if (!isPointInsideFrame(center, pose.frameWidth, pose.frameHeight)) {
+            return rejected(
+                RingFingerPoseRejectReason.OutsideFrame,
+                diagnostics.copy(axisLengthPx = axisLength),
+            )
+        }
+
+        val normal = normalHint(pose = pose, tangent = tangent)
+        val rotation = adjustedRotation(tangent)
+        val fallbackDiagnostics =
+            diagnostics.copy(
+                centerOnMcpToPip = centerOnMcpToPip,
+                lateralOffsetPx = 0f,
+                axisLengthPx = axisLength,
+                rawRotationDegrees = rotation.rawDegrees,
+                rotationCorrectionDegrees = rotation.correctionDegrees,
+                rotationCorrectionBucket = rotation.bucketName,
+                finalRotationDegrees = rotation.rotationDegrees,
+                rawConfidence = rawConfidence,
+                confidence = confidence,
+                centerPolicy = "proximal_fallback_${fallbackReason.name}",
+                rejectReason = null,
+            )
+        return RingFingerPoseSolveResult(
+            pose =
+                RingFingerPose(
+                    centerPx = center.toPoint2(),
+                    occluderStartPx = interpolate(mcp, pip, config.occluderStartOnMcpToPip).toPoint2(),
+                    occluderEndPx = interpolate(mcp, pip, config.proximalFallbackOccluderEndOnMcpToPip).toPoint2(),
+                    tangentPx = TryOnVec2(tangent.x, tangent.y),
+                    normalHintPx = TryOnVec2(normal.x, normal.y),
+                    rotationDegrees = rotation.rotationDegrees,
+                    rollDegrees = rollDegrees,
+                    fingerWidthPx = (axisLength * config.landmarkWidthRatio).coerceAtLeast(config.minFingerWidthPx),
+                    confidence = confidence,
+                    rejectReason = null,
+                    diagnostics = fallbackDiagnostics,
+                ),
+            rejectReason = null,
+            diagnostics = fallbackDiagnostics,
+        )
+    }
 
     private fun geometryDiagnostics(
         mcpToPip: CoreVec2,
@@ -210,21 +314,41 @@ class RingFingerPoseSolver(
         val isVertical =
             absLean < config.strictVerticalFingerLeanThreshold ||
                 (mcpYRatio >= config.lowerPalmVerticalYRatioMin && absLean < config.verticalFingerLeanThreshold)
+        val policyName: String
         val centerT =
             when {
-                isVertical -> config.verticalCenterOnMcpToPip
-                absLean > config.obliqueFingerLeanThreshold -> config.defaultCenterOnMcpToPip
-                mcpYRatio in config.midPalmYRatioMin..config.midPalmYRatioMax -> config.midPalmCenterOnMcpToPip
-                else -> config.defaultCenterOnMcpToPip
+                isVertical -> {
+                    policyName = "vertical_lower_palm"
+                    config.verticalCenterOnMcpToPip
+                }
+                absLean > config.obliqueFingerLeanThreshold -> {
+                    policyName = "oblique_default"
+                    config.defaultCenterOnMcpToPip
+                }
+                mcpYRatio in config.midPalmYRatioMin..config.midPalmYRatioMax -> {
+                    if (mcpYRatio <= config.midPalmUpperYRatioMax) {
+                        policyName = "mid_palm_blue_review"
+                        config.midPalmUpperCenterOnMcpToPip
+                    } else {
+                        policyName = "mid_palm"
+                        config.midPalmCenterOnMcpToPip
+                    }
+                }
+                else -> {
+                    if (mcpToPipLength >= config.upperPalmNearMcpToPipMinPx) {
+                        policyName = "upper_palm_blue_review"
+                        config.upperPalmNearCenterOnMcpToPip
+                    } else {
+                        policyName = "upper_palm_natural"
+                        config.upperPalmCenterOnMcpToPip
+                    }
+                }
             }
-        val lateralOffsetPx =
-            when {
-                isVertical -> 0f
-                absLean > config.obliqueFingerLeanThreshold -> -mcpToPipLength * config.obliqueLateralRatio
-                mcpYRatio in config.midPalmYRatioMin..config.midPalmYRatioMax -> mcpToPipLength * config.midPalmLateralRatio
-                else -> -mcpToPipLength * config.topPalmLateralRatio
-            }
-        return RingBandCenterPolicy(centerOnMcpToPip = centerT, lateralOffsetPx = lateralOffsetPx)
+        return RingBandCenterPolicy(
+            centerOnMcpToPip = centerT,
+            lateralOffsetPx = 0f,
+            policyName = policyName,
+        )
     }
 
     private fun normalHint(
@@ -250,28 +374,34 @@ class RingFingerPoseSolver(
 
     private fun adjustedRotation(tangent: CoreVec2): AdjustedRotation {
         val baseDegrees = (atan2(tangent.y, tangent.x) * RAD_TO_DEG).toFloat()
-        val obliqueCorrection = obliqueRotationCorrection(tangent)
+        val bucket = obliqueRotationCorrection(tangent)
         return AdjustedRotation(
             rawDegrees = baseDegrees,
-            correctionDegrees = obliqueCorrection,
-            rotationDegrees = baseDegrees - sign(tangent.x) * obliqueCorrection,
+            correctionDegrees = bucket.correctionDegrees,
+            rotationDegrees = baseDegrees - sign(tangent.x) * bucket.correctionDegrees,
+            bucketName = bucket.bucketName,
         )
     }
 
-    private fun obliqueRotationCorrection(tangent: CoreVec2): Float {
+    private fun obliqueRotationCorrection(tangent: CoreVec2): ObliqueRotationCorrection {
         val absLean = abs(tangent.x)
-        if (absLean < config.rotationObliqueStart) return 0f
+        if (absLean < config.rotationObliqueStart) {
+            return ObliqueRotationCorrection(correctionDegrees = 0f, bucketName = "none")
+        }
         val buckets =
             if (tangent.x < 0f) {
                 config.negativeObliqueRotationBuckets
             } else {
                 config.positiveObliqueRotationBuckets
             }
-        return buckets
+        val selected =
+            buckets
             .filter { absLean >= it.minAbsLean }
             .maxByOrNull { it.minAbsLean }
-            ?.correctionDegrees
-            ?: 0f
+        return ObliqueRotationCorrection(
+            correctionDegrees = selected?.correctionDegrees ?: 0f,
+            bucketName = selected?.let { bucket -> "absLean>=${bucket.minAbsLean}" } ?: "none",
+        )
     }
 
     private fun interpolate(
@@ -303,12 +433,19 @@ class RingFingerPoseSolver(
     private data class RingBandCenterPolicy(
         val centerOnMcpToPip: Float,
         val lateralOffsetPx: Float,
+        val policyName: String,
     )
 
     private data class AdjustedRotation(
         val rawDegrees: Float,
         val correctionDegrees: Float,
         val rotationDegrees: Float,
+        val bucketName: String,
+    )
+
+    private data class ObliqueRotationCorrection(
+        val correctionDegrees: Float,
+        val bucketName: String,
     )
 
     private data class CoreVec2(
@@ -334,5 +471,10 @@ class RingFingerPoseSolver(
         const val MIDDLE_MCP_INDEX = 9
         const val LITTLE_MCP_INDEX = 17
         const val RAD_TO_DEG = 180.0 / Math.PI
+        val PROXIMAL_FALLBACK_REASONS =
+            setOf(
+                RingFingerPoseRejectReason.FingerCurled,
+                RingFingerPoseRejectReason.DistalSegmentHidden,
+            )
     }
 }

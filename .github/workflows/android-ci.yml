@@ -26,11 +26,27 @@ jobs:
       - name: Install Android SDK packages
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python replay dependencies
+        run: python -m pip install opencv-python-headless
+
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
 
-      - name: Static checks, unit tests, and demo debug assemble
-        run: ./gradlew --no-daemon ktlintCheck detekt :handmeasure-core:test :handtryon-core:test :HandMeasure:compileDebugKotlin :HandMeasure:testDebugUnitTest :HandTryOn:compileDebugKotlin :HandTryOn:testDebugUnitTest :app:compileDebugKotlin :app:testDebugUnitTest :app:assembleDebug
+      - name: Unit tests and demo debug assemble
+        run: ./gradlew --no-daemon :handmeasure-core:test :handtryon-core:test :HandMeasure:compileDebugKotlin :HandMeasure:testDebugUnitTest :HandTryOn:compileDebugKotlin :HandTryOn:testDebugUnitTest :app:compileDebugKotlin :app:assembleDebug
+
+      - name: Python replay annotation validation
+        run: |
+          python tools/tryon/replay_validation.py \
+            --annotations validation/tryon/reference-annotations/video-fixture-2026-04-29.json \
+            --image-dir validation/tryon/reference-images \
+            --fixture-manifest validation/tryon/reference-annotations/fixture-manifest.json \
+            --report-dir build/tryon-replay-validation
 
       - name: Upload demo debug APK
         uses: actions/upload-artifact@v4

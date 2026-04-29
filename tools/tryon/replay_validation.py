@@ -44,6 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--image-dir", required=True, type=Path)
     parser.add_argument("--report-dir", required=True, type=Path)
     parser.add_argument("--predictions", type=Path)
+    parser.add_argument("--fixture-manifest", type=Path)
     parser.add_argument("--center-threshold-px", type=float, default=DEFAULT_CENTER_THRESHOLD_PX)
     parser.add_argument("--width-threshold-px", type=float, default=DEFAULT_WIDTH_THRESHOLD_PX)
     parser.add_argument("--rotation-threshold-deg", type=float, default=DEFAULT_ROTATION_THRESHOLD_DEG)
@@ -53,6 +54,17 @@ def parse_args() -> argparse.Namespace:
 def load_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def load_fixture_metadata(path: Path | None, annotation_path: Path, media: dict[str, Any] | None) -> dict[str, Any]:
+    if path is None or not path.exists():
+        return {}
+    payload = load_json(path)
+    media_file = str((media or {}).get("file", ""))
+    for fixture in payload.get("fixtures", []):
+        if fixture.get("annotationFile") == annotation_path.name or fixture.get("mediaFile") == media_file:
+            return dict(fixture)
+    return {}
 
 
 def load_predictions(path: Path | None) -> dict[str, Prediction]:
@@ -309,6 +321,7 @@ def main() -> int:
 
     annotations = load_json(args.annotations)
     media = annotations.get("media")
+    fixture_metadata = load_fixture_metadata(args.fixture_manifest, args.annotations, media)
     predictions = load_predictions(args.predictions)
     rows = [
         row_for_frame(
@@ -345,6 +358,7 @@ def main() -> int:
         "annotationFile": str(args.annotations),
         "imageDir": str(args.image_dir),
         "media": media,
+        "fixtureMetadata": fixture_metadata,
         "pipeline": [
             "image_or_video_frame",
             "mediapipe_landmarks",

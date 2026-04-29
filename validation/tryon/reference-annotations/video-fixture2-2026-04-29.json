@@ -13,40 +13,60 @@
       "frameIndex": 0,
       "timeSec": 0.0,
       "ringFingerZone": {
-        "centerX": 407,
-        "centerY": 593,
+        "centerX": 432,
+        "centerY": 589,
         "widthPx": 48,
         "rotationDeg": 81
       },
       "visibleFinger": true,
       "annotationQuality": "medium",
-      "notes": ["open_hand", "dorsal", "far_camera", "manual_ground_truth_v1"]
+      "notes": [
+        "open_hand",
+        "dorsal",
+        "far_camera",
+        "manual_ground_truth_v1",
+        "finger_shaft_centerline_reference_v2"
+      ]
     },
     {
       "frameIndex": 116,
       "timeSec": 3.86,
       "ringFingerZone": {
-        "centerX": 432,
-        "centerY": 574,
+        "centerX": 454,
+        "centerY": 535,
         "widthPx": 56,
         "rotationDeg": 86
       },
       "visibleFinger": true,
       "annotationQuality": "medium",
-      "notes": ["open_hand", "dorsal", "mid_camera", "manual_ground_truth_v1"]
+      "notes": [
+        "open_hand",
+        "dorsal",
+        "mid_camera",
+        "manual_ground_truth_v1",
+        "finger_shaft_centerline_reference_v2",
+        "blue_review_reference_v3"
+      ]
     },
     {
       "frameIndex": 231,
       "timeSec": 7.69,
       "ringFingerZone": {
-        "centerX": 384,
-        "centerY": 580,
+        "centerX": 422,
+        "centerY": 531,
         "widthPx": 66,
         "rotationDeg": 86
       },
       "visibleFinger": true,
       "annotationQuality": "medium",
-      "notes": ["open_hand", "dorsal", "left_offset", "manual_ground_truth_v1"]
+      "notes": [
+        "open_hand",
+        "dorsal",
+        "left_offset",
+        "manual_ground_truth_v1",
+        "finger_shaft_centerline_reference_v2",
+        "blue_review_reference_v3"
+      ]
     },
     {
       "frameIndex": 347,
@@ -59,33 +79,51 @@
       },
       "visibleFinger": true,
       "annotationQuality": "medium",
-      "notes": ["open_hand", "dorsal", "near_camera", "manual_ground_truth_v1"]
+      "notes": [
+        "open_hand",
+        "dorsal",
+        "near_camera",
+        "manual_ground_truth_v1",
+        "finger_shaft_centerline_reference_v2"
+      ]
     },
     {
       "frameIndex": 463,
       "timeSec": 15.4,
       "ringFingerZone": {
-        "centerX": 511,
-        "centerY": 646,
+        "centerX": 486,
+        "centerY": 635,
         "widthPx": 74,
         "rotationDeg": 101
       },
       "visibleFinger": true,
       "annotationQuality": "medium",
-      "notes": ["open_hand", "dorsal", "right_side", "manual_ground_truth_v1"]
+      "notes": [
+        "open_hand",
+        "dorsal",
+        "right_side",
+        "manual_ground_truth_v1",
+        "finger_shaft_centerline_reference_v2"
+      ]
     },
     {
       "frameIndex": 578,
       "timeSec": 19.23,
       "ringFingerZone": {
-        "centerX": 359,
-        "centerY": 673,
+        "centerX": 345,
+        "centerY": 669,
         "widthPx": 50,
         "rotationDeg": 85
       },
       "visibleFinger": true,
       "annotationQuality": "medium",
-      "notes": ["open_hand", "dorsal", "far_camera", "manual_ground_truth_v1"]
+      "notes": [
+        "open_hand",
+        "dorsal",
+        "far_camera",
+        "manual_ground_truth_v1",
+        "finger_shaft_centerline_reference_v2"
+      ]
     }
   ]
 }

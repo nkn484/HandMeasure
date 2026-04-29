@@ -38,8 +38,11 @@ data class RingFingerPoseDiagnostics(
     val axisLengthPx: Float = 0f,
     val rawRotationDegrees: Float = 0f,
     val rotationCorrectionDegrees: Float = 0f,
+    val rotationCorrectionBucket: String = "",
+    val finalRotationDegrees: Float = 0f,
     val rawConfidence: Float = 0f,
     val confidence: Float = 0f,
+    val centerPolicy: String = "",
     val rejectReason: RingFingerPoseRejectReason? = null,
 )
 

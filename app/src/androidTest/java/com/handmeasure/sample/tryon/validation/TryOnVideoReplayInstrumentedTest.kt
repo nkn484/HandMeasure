@@ -2,6 +2,7 @@ package com.handmeasure.sample.tryon.validation
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorMatrix
@@ -16,6 +17,12 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.google.common.truth.Truth.assertThat
 import com.handmeasure.vision.HandDetection
 import com.handmeasure.vision.MediaPipeHandLandmarkEngine
+import com.handtryon.coreengine.model.TryOnPlacement
+import com.handtryon.coreengine.validation.TryOnImageAugmentation
+import com.handtryon.coreengine.validation.TryOnTemporalQualityModel
+import com.handtryon.coreengine.validation.TryOnTemporalSample
+import com.handtryon.coreengine.validation.VisualDiffPolicy
+import com.handtryon.coreengine.validation.VisualDiffThresholds
 import com.handtryon.domain.HandPoseSnapshot
 import com.handtryon.domain.LandmarkPoint
 import com.handtryon.domain.TryOnTrackingState
@@ -23,19 +30,20 @@ import com.handtryon.domain.TryOnUpdateAction
 import com.handtryon.render3d.TryOnRenderState3DFactory
 import com.handtryon.tracking.FrameSource
 import com.handtryon.tracking.TrackedHandFrameMapper
-import com.handtryon.coreengine.validation.TryOnImageAugmentation
-import com.handtryon.coreengine.validation.TryOnTemporalQualityModel
-import com.handtryon.coreengine.validation.TryOnTemporalSample
-import com.handtryon.coreengine.model.TryOnPlacement
-import java.io.File
-import kotlin.math.abs
-import kotlin.math.cos
-import kotlin.math.hypot
-import kotlin.math.sin
+import com.handtryon.validation.TryOnTelemetryFrame
+import com.handtryon.validation.TryOnTelemetryJsonLinesExporter
+import com.handtryon.validation.TryOnTelemetryRendererMode
+import com.handtryon.validation.TryOnTelemetryTransform
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.File
+import java.io.IOException
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.hypot
+import kotlin.math.sin
 
 @RunWith(AndroidJUnit4::class)
 class TryOnVideoReplayInstrumentedTest {
@@ -43,7 +51,13 @@ class TryOnVideoReplayInstrumentedTest {
     fun videoFixture_runsThroughMediaPipeAndRenderStatePipeline() {
         val targetContext = ApplicationProvider.getApplicationContext<Context>()
         val testAssets = InstrumentationRegistry.getInstrumentation().context.assets
-        val reportDir = File(targetContext.getExternalFilesDir(null), "tryon_replay").apply { mkdirs() }
+        val outputRoot =
+            InstrumentationRegistry.getArguments()
+                .getString("additionalTestOutputDir")
+                ?.takeIf { it.isNotBlank() }
+                ?.let(::File)
+                ?: targetContext.getExternalFilesDir(null)
+        val reportDir = File(outputRoot, "tryon_replay").apply { mkdirs() }
         val renderer = TryOnRenderState3DFactory()
         val handEngine = MediaPipeHandLandmarkEngine(targetContext)
 
@@ -75,6 +89,9 @@ class TryOnVideoReplayInstrumentedTest {
         val fixtureName = annotationAsset.removeSuffix(".json")
         val screenshotDir = File(reportDir, "$fixtureName-screenshots").apply { mkdirs() }
         val reportFile = File(reportDir, "$fixtureName-android-report.json")
+        val telemetryFile = File(reportDir, "$fixtureName-telemetry.jsonl").apply { delete() }
+        val telemetryExporter = TryOnTelemetryJsonLinesExporter(enabled = true, outputFile = telemetryFile)
+        val fixtureMetadata = fixtureMetadata(annotationAsset, media, testAssets)
         val frameRows = JSONArray()
         val retriever = MediaMetadataRetriever()
 
@@ -98,15 +115,18 @@ class TryOnVideoReplayInstrumentedTest {
                                 frameHeight = bitmap.height,
                             )
                         }
-                    frameRows.put(
+                    val row =
                         runFrame(
                             expectedFrame = augmentedExpected,
                             bitmap = augmentedBitmap,
                             handEngine = handEngine,
                             renderer = renderer,
                             screenshotDir = screenshotDir,
-                        ),
-                    )
+                            testAssets = testAssets,
+                            fixtureName = fixtureName,
+                        )
+                    frameRows.put(row)
+                    telemetryExporter.append(row.toTelemetryFrame())
                     augmentedBitmap?.recycle()
                 }
                 bitmap?.recycle()
@@ -122,10 +142,13 @@ class TryOnVideoReplayInstrumentedTest {
                 .put("source", "android_instrumented_mediapipe_replay")
                 .put("annotationAsset", annotationAsset)
                 .put("media", media)
+                .put("fixtureMetadata", fixtureMetadata)
                 .put("screenshotDir", screenshotDir.absolutePath)
+                .put("telemetryFile", telemetryFile.absolutePath)
                 .put("summary", summary)
                 .put("augmentationSummary", summarizeAugmentations(frameRows))
                 .put("temporalQuality", temporalQuality(frameRows))
+                .put("visualDiff", summarizeVisualDiff(frameRows))
                 .put("baselineRegression", baselineRegression(annotationAsset, summary))
                 .put("frames", frameRows)
         reportFile.writeText(report.toString(2), Charsets.UTF_8)
@@ -141,16 +164,21 @@ class TryOnVideoReplayInstrumentedTest {
         handEngine: MediaPipeHandLandmarkEngine,
         renderer: TryOnRenderState3DFactory,
         screenshotDir: File,
+        testAssets: android.content.res.AssetManager,
+        fixtureName: String,
     ): JSONObject {
         val visibleFinger = expectedFrame.getBoolean("visibleFinger")
         if (bitmap == null) {
             return baseRow(expectedFrame, visibleFinger)
                 .put("status", "unreadable_frame")
                 .put("pass", false)
+                .put("visualDiff", JSONObject().put("status", "not_run").put("reason", "unreadable_frame"))
                 .put("reason", "MediaMetadataRetriever returned null frame")
         }
 
+        val detectorStartNs = System.nanoTime()
         val detection = handEngine.detect(bitmap)
+        val detectorLatencyMs = (System.nanoTime() - detectorStartNs) / 1_000_000.0
         val renderState =
             detection
                 ?.toTrackedFrame(bitmap)
@@ -168,16 +196,20 @@ class TryOnVideoReplayInstrumentedTest {
                 }
 
         if (renderState == null) {
+            val overlayFile = File(screenshotDir, screenshotName(expectedFrame))
             saveReplayOverlay(
                 source = bitmap,
                 expectedFrame = expectedFrame,
                 predicted = null,
-                output = File(screenshotDir, screenshotName(expectedFrame)),
+                output = overlayFile,
             )
+            val visualDiff = compareReplayGolden(testAssets, fixtureName, overlayFile)
             return baseRow(expectedFrame, visibleFinger)
                 .put("status", "no_render_state")
                 .put("pass", !visibleFinger)
                 .put("confidence", detection?.confidence ?: 0.0)
+                .put("detectorLatencyMs", detectorLatencyMs)
+                .put("visualDiff", visualDiff)
                 .put("debugLandmarks", detection?.debugRingFingerLandmarks() ?: JSONObject())
                 .put("reason", if (visibleFinger) "No render state for visible ring finger" else "Correctly hidden")
         }
@@ -192,7 +224,7 @@ class TryOnVideoReplayInstrumentedTest {
         val rotationError = normalizeAxisDegrees(renderState.fingerPose.rotationDegrees - expected.getDouble("rotationDeg"))
         val centerErrorRatio = centerError / renderState.fitState.targetWidthPx.coerceAtLeast(1f)
         val widthErrorRatio = widthError / expected.getDouble("widthPx").coerceAtLeast(1.0)
-        val pass =
+        val metricPass =
             if (!visibleFinger) {
                 false
             } else {
@@ -202,6 +234,7 @@ class TryOnVideoReplayInstrumentedTest {
                     renderState.visualQa?.passesBasicGate != false
             }
 
+        val overlayFile = File(screenshotDir, screenshotName(expectedFrame))
         saveReplayOverlay(
             source = bitmap,
             expectedFrame = expectedFrame,
@@ -211,8 +244,10 @@ class TryOnVideoReplayInstrumentedTest {
                     centerY = renderState.fingerPose.centerPx.y,
                     widthPx = renderState.fitState.targetWidthPx,
                 ),
-            output = File(screenshotDir, screenshotName(expectedFrame)),
+            output = overlayFile,
         )
+        val visualDiff = compareReplayGolden(testAssets, fixtureName, overlayFile)
+        val pass = metricPass && visualDiff.optBoolean("pass", true)
 
         return baseRow(expectedFrame, visibleFinger)
             .put("status", "measured")
@@ -223,20 +258,34 @@ class TryOnVideoReplayInstrumentedTest {
             .put("widthErrorRatio", widthErrorRatio)
             .put("rotationErrorDeg", rotationError)
             .put("confidence", renderState.fingerPose.confidence.toDouble())
-            .put("predictedRingFingerZone", JSONObject()
-                .put("centerX", renderState.fingerPose.centerPx.x.toDouble())
-                .put("centerY", renderState.fingerPose.centerPx.y.toDouble())
-                .put("widthPx", renderState.fitState.targetWidthPx.toDouble())
-                .put("rotationDeg", renderState.fingerPose.rotationDegrees.toDouble())
-                .put("fingerWidthPx", renderState.fingerPose.fingerWidthPx.toDouble())
-                .put("normalHintX", renderState.fingerPose.normalHintPx.x.toDouble())
-                .put("normalHintY", renderState.fingerPose.normalHintPx.y.toDouble()))
+            .put("detectorLatencyMs", detectorLatencyMs)
+            .put(
+                "predictedRingFingerZone",
+                JSONObject()
+                    .put("centerX", renderState.fingerPose.centerPx.x.toDouble())
+                    .put("centerY", renderState.fingerPose.centerPx.y.toDouble())
+                    .put("widthPx", renderState.fitState.targetWidthPx.toDouble())
+                    .put("rotationDeg", renderState.fingerPose.rotationDegrees.toDouble())
+                    .put("fingerWidthPx", renderState.fingerPose.fingerWidthPx.toDouble())
+                    .put("normalHintX", renderState.fingerPose.normalHintPx.x.toDouble())
+                    .put("normalHintY", renderState.fingerPose.normalHintPx.y.toDouble()),
+            )
             .put("poseDiagnostics", renderState.fingerPose.diagnostics?.toJson() ?: JSONObject())
             .put("fitDiagnostics", renderState.fitState.diagnostics?.toJson() ?: JSONObject())
             .put("visualQa", renderState.visualQa?.toJson() ?: JSONObject())
+            .put("visualDiff", visualDiff)
             .put("renderPasses", JSONArray(renderState.renderPasses.map { it.name }))
             .put("debugLandmarks", detection.debugRingFingerLandmarks())
-            .put("reason", if (pass) "" else if (!visibleFinger) "Unexpected render state for hidden ring finger" else "Metric exceeded threshold")
+            .put(
+                "reason",
+                if (pass) {
+                    ""
+                } else if (!visibleFinger) {
+                    "Unexpected render state for hidden ring finger"
+                } else {
+                    "Metric exceeded threshold"
+                },
+            )
     }
 
     private fun com.handtryon.coreengine.model.RingFingerPoseDiagnostics.toJson(): JSONObject =
@@ -250,7 +299,10 @@ class TryOnVideoReplayInstrumentedTest {
             .put("axisLengthPx", axisLengthPx.toDouble())
             .put("rawRotationDegrees", rawRotationDegrees.toDouble())
             .put("rotationCorrectionDegrees", rotationCorrectionDegrees.toDouble())
+            .put("rotationCorrectionBucket", rotationCorrectionBucket)
+            .put("finalRotationDegrees", finalRotationDegrees.toDouble())
             .put("confidence", confidence.toDouble())
+            .put("centerPolicy", centerPolicy)
             .put("rejectReason", rejectReason?.name ?: "")
 
     private fun com.handtryon.coreengine.model.RingFitDiagnostics.toJson(): JSONObject =
@@ -296,6 +348,112 @@ class TryOnVideoReplayInstrumentedTest {
             .put("x", x.toDouble())
             .put("y", y.toDouble())
             .put("z", z.toDouble())
+
+    private fun compareReplayGolden(
+        testAssets: android.content.res.AssetManager,
+        fixtureName: String,
+        actualFile: File,
+    ): JSONObject {
+        val goldenAsset = "goldens/$fixtureName/${actualFile.name}"
+        val golden =
+            try {
+                testAssets.open(goldenAsset).use { stream -> BitmapFactory.decodeStream(stream) }
+            } catch (_: IOException) {
+                return JSONObject()
+                    .put("goldenAsset", goldenAsset)
+                    .put("actualPng", actualFile.absolutePath)
+                    .put("goldenMissing", true)
+                    .put("pass", true)
+                    .put("status", "golden_missing")
+            }
+        val actual =
+            BitmapFactory.decodeFile(actualFile.absolutePath)
+                ?: run {
+                    golden.recycle()
+                    return JSONObject()
+                        .put("goldenAsset", goldenAsset)
+                        .put("actualPng", actualFile.absolutePath)
+                        .put("pass", false)
+                        .put("status", "actual_unreadable")
+                }
+        if (golden.width != actual.width || golden.height != actual.height) {
+            val diffFile = File(actualFile.parentFile, actualFile.nameWithoutExtension + "-diff.png")
+            actual.recycle()
+            golden.recycle()
+            return JSONObject()
+                .put("goldenAsset", goldenAsset)
+                .put("actualPng", actualFile.absolutePath)
+                .put("diffPng", diffFile.absolutePath)
+                .put("pass", false)
+                .put("status", "dimension_mismatch")
+        }
+
+        val actualPixels = actual.toArgbArray()
+        val goldenPixels = golden.toArgbArray()
+        val result =
+            VisualDiffPolicy(
+                VisualDiffThresholds(
+                    maxMeanAbsoluteError = 4.0,
+                    maxRmsError = 9.0,
+                    maxLumaMeanAbsoluteError = 5.0,
+                ),
+            ).compare(
+                actualArgb = actualPixels,
+                expectedArgb = goldenPixels,
+                width = actual.width,
+                height = actual.height,
+            )
+        val diffFile = File(actualFile.parentFile, actualFile.nameWithoutExtension + "-diff.png")
+        if (!result.pass) {
+            writeDiffBitmap(actualPixels, goldenPixels, actual.width, actual.height, diffFile)
+        }
+        actual.recycle()
+        golden.recycle()
+        return result.toJson()
+            .put("goldenAsset", goldenAsset)
+            .put("actualPng", actualFile.absolutePath)
+            .put("diffPng", if (result.pass) JSONObject.NULL else diffFile.absolutePath)
+            .put("goldenMissing", false)
+            .put("status", if (result.pass) "passed" else "failed")
+    }
+
+    private fun Bitmap.toArgbArray(): IntArray =
+        IntArray(width * height).also { pixels ->
+            getPixels(pixels, 0, width, 0, 0, width, height)
+        }
+
+    private fun com.handtryon.coreengine.validation.VisualDiffResult.toJson(): JSONObject =
+        JSONObject()
+            .put("width", width)
+            .put("height", height)
+            .put("comparedPixels", comparedPixels)
+            .put("meanAbsoluteError", meanAbsoluteError)
+            .put("rmsError", rmsError)
+            .put("lumaMeanAbsoluteError", lumaMeanAbsoluteError)
+            .put("pass", pass)
+            .put("warnings", JSONArray(warnings))
+
+    private fun writeDiffBitmap(
+        actualPixels: IntArray,
+        goldenPixels: IntArray,
+        width: Int,
+        height: Int,
+        output: File,
+    ) {
+        val diffPixels =
+            IntArray(width * height) { index ->
+                val actual = actualPixels[index]
+                val golden = goldenPixels[index]
+                val dr = kotlin.math.abs(((actual shr 16) and 0xff) - ((golden shr 16) and 0xff))
+                val dg = kotlin.math.abs(((actual shr 8) and 0xff) - ((golden shr 8) and 0xff))
+                val db = kotlin.math.abs((actual and 0xff) - (golden and 0xff))
+                val intensity = maxOf(dr, dg, db).coerceIn(0, 255)
+                Color.argb(255, intensity, 0, 0)
+            }
+        val diff = Bitmap.createBitmap(diffPixels, width, height, Bitmap.Config.ARGB_8888)
+        output.outputStream().use { stream -> diff.compress(Bitmap.CompressFormat.PNG, 100, stream) }
+        diff.recycle()
+    }
 
     private fun saveReplayOverlay(
         source: Bitmap,
@@ -343,7 +501,9 @@ class TryOnVideoReplayInstrumentedTest {
     }
 
     private fun screenshotName(expectedFrame: JSONObject): String =
-        "frame_${expectedFrame.getInt("frameIndex").toString().padStart(6, '0')}_${expectedFrame.optString("augmentationId", "identity")}.png"
+        "frame_${expectedFrame.getInt(
+            "frameIndex",
+        ).toString().padStart(6, '0')}_${expectedFrame.optString("augmentationId", "identity")}.png"
 
     private fun Bitmap.augment(augmentation: TryOnImageAugmentation): Bitmap {
         val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -383,13 +543,14 @@ class TryOnVideoReplayInstrumentedTest {
     ): JSONObject {
         val copy = JSONObject(toString())
         val zone = copy.getJSONObject("ringFingerZone")
-        val rotated = rotatePoint(
-            x = zone.getDouble("centerX"),
-            y = zone.getDouble("centerY"),
-            degrees = augmentation.rotationDegrees.toDouble(),
-            frameWidth = frameWidth.toDouble(),
-            frameHeight = frameHeight.toDouble(),
-        )
+        val rotated =
+            rotatePoint(
+                x = zone.getDouble("centerX"),
+                y = zone.getDouble("centerY"),
+                degrees = augmentation.rotationDegrees.toDouble(),
+                frameWidth = frameWidth.toDouble(),
+                frameHeight = frameHeight.toDouble(),
+            )
         zone
             .put("centerX", rotated.first)
             .put("centerY", rotated.second)
@@ -435,6 +596,7 @@ class TryOnVideoReplayInstrumentedTest {
             .put("augmentationId", expectedFrame.optString("augmentationId", "identity"))
             .put("visibleFinger", visibleFinger)
             .put("declaredAnnotationQuality", expectedFrame.optString("annotationQuality"))
+            .put("expectedRingFingerZone", JSONObject(expectedFrame.getJSONObject("ringFingerZone").toString()))
 
     private fun MediaMetadataRetriever.frameForAnnotation(expectedFrame: JSONObject): Bitmap? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -457,12 +619,80 @@ class TryOnVideoReplayInstrumentedTest {
                     timestampMs = System.currentTimeMillis(),
                 ),
             source = FrameSource.Replay,
-            handedness = when (handedness.lowercase()) {
-                "left" -> com.handtryon.tracking.Handedness.Left
-                "right" -> com.handtryon.tracking.Handedness.Right
-                else -> com.handtryon.tracking.Handedness.Unknown
-            },
+            handedness =
+                when (handedness.lowercase()) {
+                    "left" -> com.handtryon.tracking.Handedness.Left
+                    "right" -> com.handtryon.tracking.Handedness.Right
+                    else -> com.handtryon.tracking.Handedness.Unknown
+                },
         )
+
+    private fun fixtureMetadata(
+        annotationAsset: String,
+        media: JSONObject,
+        testAssets: android.content.res.AssetManager,
+    ): JSONObject {
+        val manifest =
+            try {
+                JSONObject(testAssets.open("fixture-manifest.json").bufferedReader().use { it.readText() })
+            } catch (_: IOException) {
+                return JSONObject()
+            }
+        val fixtures = manifest.optJSONArray("fixtures") ?: return JSONObject()
+        val mediaFile = media.optString("file")
+        for (index in 0 until fixtures.length()) {
+            val fixture = fixtures.getJSONObject(index)
+            if (fixture.optString("annotationFile") == annotationAsset || fixture.optString("mediaFile") == mediaFile) {
+                return fixture
+            }
+        }
+        return JSONObject()
+    }
+
+    private fun JSONObject.toTelemetryFrame(): TryOnTelemetryFrame {
+        val predicted = optJSONObject("predictedRingFingerZone")
+        val poseDiagnostics = optJSONObject("poseDiagnostics")
+        val warnings = mutableListOf<String>()
+        optJSONObject("visualQa")?.optJSONArray("warnings")?.let { array ->
+            for (index in 0 until array.length()) warnings += array.getString(index)
+        }
+        optJSONObject("visualDiff")?.let { diff ->
+            if (diff.optBoolean("goldenMissing", false)) warnings += "visual_golden_missing"
+            diff.optJSONArray("warnings")?.let { array ->
+                for (index in 0 until array.length()) warnings += "visual_${array.getString(index)}"
+            }
+        }
+        val measured = optString("status") == "measured"
+        return TryOnTelemetryFrame(
+            timestampMs = (optDouble("timeSec", 0.0) * 1000.0).toLong(),
+            frameIndex = getInt("frameIndex"),
+            rendererMode = TryOnTelemetryRendererMode.CameraRelative3D,
+            trackingState = "Candidate",
+            updateAction = if (measured) "Update" else "Hide",
+            qualityScore = optDouble("confidence", 0.0).toFloat(),
+            rawTransform =
+                TryOnTelemetryTransform(
+                    centerX = predicted?.optDouble("centerX")?.toFloat(),
+                    centerY = predicted?.optDouble("centerY")?.toFloat(),
+                    scale = predicted?.optDouble("widthPx")?.toFloat(),
+                    rotationDegrees = poseDiagnostics?.optDouble("rawRotationDegrees")?.toFloat(),
+                ),
+            smoothedTransform =
+                TryOnTelemetryTransform(
+                    centerX = predicted?.optDouble("centerX")?.toFloat(),
+                    centerY = predicted?.optDouble("centerY")?.toFloat(),
+                    scale = predicted?.optDouble("widthPx")?.toFloat(),
+                    rotationDegrees = predicted?.optDouble("rotationDeg")?.toFloat(),
+                ),
+            renderStateUpdateHz = null,
+            detectorLatencyMs = optDouble("detectorLatencyMs", Double.NaN).takeUnless { it.isNaN() }?.toFloat(),
+            nodeRecreateCount = 0,
+            rendererErrorStage = if (measured) null else optString("status"),
+            rendererErrorMessage = optString("reason").takeIf { it.isNotBlank() },
+            approxMemoryDeltaKb = null,
+            warnings = warnings.distinct(),
+        )
+    }
 
     private fun summarize(rows: JSONArray): JSONObject {
         var unreadable = 0
@@ -550,6 +780,33 @@ class TryOnVideoReplayInstrumentedTest {
         return summaries
     }
 
+    private fun summarizeVisualDiff(rows: JSONArray): JSONObject {
+        var compared = 0
+        var passed = 0
+        var failed = 0
+        var missing = 0
+        for (index in 0 until rows.length()) {
+            val visualDiff = rows.getJSONObject(index).optJSONObject("visualDiff") ?: continue
+            if (visualDiff.optBoolean("goldenMissing", false)) {
+                missing += 1
+                continue
+            }
+            if (visualDiff.optString("status") == "not_run") continue
+            compared += 1
+            if (visualDiff.optBoolean("pass", false)) {
+                passed += 1
+            } else {
+                failed += 1
+            }
+        }
+        return JSONObject()
+            .put("comparedFrames", compared)
+            .put("passedFrames", passed)
+            .put("failedFrames", failed)
+            .put("goldenMissingFrames", missing)
+            .put("strict", compared > 0)
+    }
+
     private fun temporalQuality(rows: JSONArray): JSONObject {
         val samples = mutableListOf<TryOnTemporalSample>()
         for (index in 0 until rows.length()) {
@@ -573,7 +830,12 @@ class TryOnVideoReplayInstrumentedTest {
                     placement = placement,
                     qualityScore = row.optDouble("confidence", 0.0).toFloat(),
                     trackingState = TryOnTrackingState.Candidate.toCoreTrackingState(),
-                    updateAction = if (placement == null) TryOnUpdateAction.Hide.toCoreUpdateAction() else TryOnUpdateAction.Update.toCoreUpdateAction(),
+                    updateAction =
+                        if (placement == null) {
+                            TryOnUpdateAction.Hide.toCoreUpdateAction()
+                        } else {
+                            TryOnUpdateAction.Update.toCoreUpdateAction()
+                        },
                 )
         }
         val metrics = TryOnTemporalQualityModel().evaluate(samples)
@@ -687,8 +949,7 @@ class TryOnVideoReplayInstrumentedTest {
         return abs(normalized)
     }
 
-    private fun normalizeAxisDegrees(value: Double): Double =
-        minOf(normalizeDegrees(value), normalizeDegrees(value + 180.0))
+    private fun normalizeAxisDegrees(value: Double): Double = minOf(normalizeDegrees(value), normalizeDegrees(value + 180.0))
 
     private companion object {
         val ANNOTATION_ASSETS =
