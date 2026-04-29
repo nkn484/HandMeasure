@@ -10,6 +10,7 @@ internal data class TryOnEngineRequest(
     val asset: TryOnAssetSource,
     val handPose: TryOnHandPoseSnapshot?,
     val measurement: TryOnMeasurementSnapshot?,
+    val selectedDiameterMm: Float? = null,
     val manualPlacement: TryOnPlacement?,
     val previousSession: TryOnSession?,
     val frameWidth: Int,

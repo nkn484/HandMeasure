@@ -4,6 +4,7 @@ import com.handtryon.domain.HandPoseSnapshot
 import com.handtryon.domain.MeasurementSnapshot
 import com.handtryon.domain.RingAssetSource
 import com.handtryon.domain.RingPlacement
+import com.handtryon.domain.TryOnMeasurementInput
 import com.handtryon.domain.TryOnSession
 import com.handtryon.engine.TryOnEngine
 import com.handtryon.engine.compat.TryOnEngineDomainMapper
@@ -22,6 +23,7 @@ class TryOnSessionResolver internal constructor(
         asset: RingAssetSource,
         handPose: HandPoseSnapshot?,
         measurement: MeasurementSnapshot?,
+        selectedDiameterMm: Float? = null,
         manualPlacement: RingPlacement?,
         previousSession: TryOnSession?,
         frameWidth: Int,
@@ -32,6 +34,7 @@ class TryOnSessionResolver internal constructor(
             asset = asset,
             handPose = handPose,
             measurement = measurement,
+            selectedDiameterMm = selectedDiameterMm,
             manualPlacement = manualPlacement,
             previousSession = previousSession,
             frameWidth = frameWidth,
@@ -39,10 +42,34 @@ class TryOnSessionResolver internal constructor(
             nowMs = nowMs,
         ).session
 
+    fun resolve(
+        asset: RingAssetSource,
+        handPose: HandPoseSnapshot?,
+        measurementInput: TryOnMeasurementInput?,
+        selectedDiameterMm: Float? = null,
+        manualPlacement: RingPlacement?,
+        previousSession: TryOnSession?,
+        frameWidth: Int,
+        frameHeight: Int,
+        nowMs: Long = System.currentTimeMillis(),
+    ): TryOnSession =
+        resolve(
+            asset = asset,
+            handPose = handPose,
+            measurement = measurementInput?.toSnapshot(),
+            selectedDiameterMm = selectedDiameterMm,
+            manualPlacement = manualPlacement,
+            previousSession = previousSession,
+            frameWidth = frameWidth,
+            frameHeight = frameHeight,
+            nowMs = nowMs,
+        )
+
     fun resolveState(
         asset: RingAssetSource,
         handPose: HandPoseSnapshot?,
         measurement: MeasurementSnapshot?,
+        selectedDiameterMm: Float? = null,
         manualPlacement: RingPlacement?,
         previousSession: TryOnSession?,
         frameWidth: Int,
@@ -54,6 +81,7 @@ class TryOnSessionResolver internal constructor(
                 asset = asset,
                 handPose = handPose,
                 measurement = measurement,
+                selectedDiameterMm = selectedDiameterMm,
                 manualPlacement = manualPlacement,
                 previousSession = previousSession,
                 frameWidth = frameWidth,
@@ -62,4 +90,35 @@ class TryOnSessionResolver internal constructor(
             )
         return mapper.toSessionResolution(engine.resolve(request))
     }
+
+    fun resolveState(
+        asset: RingAssetSource,
+        handPose: HandPoseSnapshot?,
+        measurementInput: TryOnMeasurementInput?,
+        selectedDiameterMm: Float? = null,
+        manualPlacement: RingPlacement?,
+        previousSession: TryOnSession?,
+        frameWidth: Int,
+        frameHeight: Int,
+        nowMs: Long = System.currentTimeMillis(),
+    ): TryOnSessionResolution =
+        resolveState(
+            asset = asset,
+            handPose = handPose,
+            measurement = measurementInput?.toSnapshot(),
+            selectedDiameterMm = selectedDiameterMm,
+            manualPlacement = manualPlacement,
+            previousSession = previousSession,
+            frameWidth = frameWidth,
+            frameHeight = frameHeight,
+            nowMs = nowMs,
+        )
+
+    private fun TryOnMeasurementInput.toSnapshot(): MeasurementSnapshot =
+        MeasurementSnapshot(
+            equivalentDiameterMm = equivalentDiameterMm,
+            fingerWidthMm = fingerWidthMm ?: 0f,
+            confidence = confidence,
+            usable = confidence > 0f,
+        )
 }

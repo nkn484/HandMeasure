@@ -32,6 +32,7 @@ internal class TryOnEngineDomainMapper {
         asset: RingAssetSource,
         handPose: HandPoseSnapshot?,
         measurement: MeasurementSnapshot?,
+        selectedDiameterMm: Float? = null,
         manualPlacement: RingPlacement?,
         previousSession: TryOnSession?,
         frameWidth: Int,
@@ -42,6 +43,7 @@ internal class TryOnEngineDomainMapper {
             asset = asset.toCoreAsset(),
             handPose = handPose?.toCoreHandPoseInternal(),
             measurement = measurement?.toCoreMeasurement(),
+            selectedDiameterMm = selectedDiameterMm,
             manualPlacement = manualPlacement?.toCorePlacementInternal(),
             previousSession = previousSession?.toCoreSession(),
             frameWidth = frameWidth,
@@ -57,6 +59,7 @@ internal class TryOnEngineDomainMapper {
         TryOnSessionResolution(
             session = toDomainSession(result),
             renderState = toRenderState(result),
+            renderState3D = result.renderState3D,
         )
 
     fun toCoreHandPose(pose: HandPoseSnapshot): CoreHandPoseSnapshot = pose.toCoreHandPoseInternal()

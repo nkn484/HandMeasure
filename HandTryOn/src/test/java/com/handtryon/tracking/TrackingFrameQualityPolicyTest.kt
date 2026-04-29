@@ -53,6 +53,42 @@ class TrackingFrameQualityPolicyTest {
         assertThat(policy.rejectReason(frame)).isEqualTo(TrackingRejectReason.UnstableGeometry)
     }
 
+    @Test
+    fun assess_addsPenaltyForNearEdgeAndCrossing() {
+        val frame =
+            frame(
+                landmarks =
+                    MutableList(21) { TrackedLandmark(100f, 100f) }.apply {
+                        this[13] = TrackedLandmark(5f, 5f)
+                        this[14] = TrackedLandmark(12f, 18f)
+                        this[15] = TrackedLandmark(20f, 30f)
+                        this[10] = TrackedLandmark(14f, 20f)
+                        this[18] = TrackedLandmark(16f, 22f)
+                    },
+            )
+
+        val assessment = policy.assess(frame)
+
+        assertThat(assessment.rejectReason).isNull()
+        assertThat(assessment.penaltyScore).isGreaterThan(0f)
+        assertThat(assessment.notes).containsAtLeast("finger_near_edge", "ring_finger_crossing")
+    }
+
+    @Test
+    fun rejectReason_rejectsImpossibleGeometry() {
+        val frame =
+            frame(
+                landmarks =
+                    MutableList(21) { TrackedLandmark(100f, 100f) }.apply {
+                        this[13] = TrackedLandmark(100f, 120f)
+                        this[14] = TrackedLandmark(100f, 140f)
+                        this[15] = TrackedLandmark(100f, 130f)
+                    },
+            )
+
+        assertThat(policy.rejectReason(frame)).isEqualTo(TrackingRejectReason.ImpossibleGeometry)
+    }
+
     private fun frame(
         confidence: Float = 0.9f,
         landmarks: List<TrackedLandmark> =

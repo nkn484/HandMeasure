@@ -35,7 +35,14 @@ enum class TrackingRejectReason {
     FingerOutsideFrame,
     LowConfidence,
     UnstableGeometry,
+    ImpossibleGeometry,
 }
+
+data class TrackingFrameQualityAssessment(
+    val rejectReason: TrackingRejectReason?,
+    val penaltyScore: Float = 0f,
+    val notes: List<String> = emptyList(),
+)
 
 data class TrackedHandFrame(
     val frameWidth: Int,

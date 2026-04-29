@@ -113,6 +113,8 @@ class TryOnSessionResolverTest {
         assertThat(resolution.renderState.mode).isEqualTo(TryOnMode.Measured)
         assertThat(resolution.renderState.generatedAtMs).isEqualTo(2000L)
         assertThat(resolution.renderState.qualityScore).isEqualTo(resolution.session.quality.qualityScore)
+        assertThat(resolution.renderState3D).isNotNull()
+        assertThat(resolution.renderState3D?.quality?.updateAction?.name).isEqualTo(resolution.session.quality.updateAction.name)
     }
 
     private fun ringPose(timestampMs: Long = 1000L): HandPoseSnapshot {

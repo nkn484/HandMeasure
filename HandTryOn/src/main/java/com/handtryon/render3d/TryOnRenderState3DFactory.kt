@@ -33,10 +33,13 @@ class TryOnRenderState3DFactory(
         trackingState: TryOnTrackingState,
         updateAction: TryOnUpdateAction,
     ): TryOnRenderState3D? {
-        if (trackingQualityPolicy.rejectReason(trackedHandFrame) != null) return null
+        val assessment = trackingQualityPolicy.assess(trackedHandFrame)
+        if (assessment.rejectReason != null) return null
         val frame = trackedHandFrame ?: return null
         val corePose = poseSolver.solve(TrackedHandFrameMapper.toCorePose(frame)) ?: return null
         val coreMeasurement = measurement.toCoreMeasurement()
+        val adjustedQualityScore = (qualityScore - assessment.penaltyScore).coerceIn(0f, 1f)
+        val adjustedAction = adjustedAction(baseAction = updateAction, adjustedQualityScore = adjustedQualityScore)
         val fit =
             fitSolver.solve(
                 fingerPose = corePose,
@@ -54,14 +57,25 @@ class TryOnRenderState3DFactory(
                     landmarkConfidence = corePose.confidence,
                     usedLastGoodAnchor = false,
                     trackingState = trackingState.toCoreTrackingState(),
-                    qualityScore = qualityScore,
-                    updateAction = updateAction.toCoreUpdateAction(),
+                    qualityScore = adjustedQualityScore,
+                    updateAction = adjustedAction.toCoreUpdateAction(),
+                    hints = assessment.notes,
                 ),
             frameWidth = frameWidth,
             frameHeight = frameHeight,
         )
         return renderState.withAssetScale(glbSummary)
     }
+
+    private fun adjustedAction(
+        baseAction: TryOnUpdateAction,
+        adjustedQualityScore: Float,
+    ): TryOnUpdateAction =
+        when {
+            adjustedQualityScore < 0.22f -> TryOnUpdateAction.Hide
+            adjustedQualityScore < 0.4f -> TryOnUpdateAction.FreezeScaleRotation
+            else -> baseAction
+        }
 
     private fun TryOnRenderState3D.withAssetScale(glbSummary: GlbAssetSummary?): TryOnRenderState3D {
         val multiplier = glbSummary?.scale?.defaultScale?.takeIf { it > 0f } ?: 1f

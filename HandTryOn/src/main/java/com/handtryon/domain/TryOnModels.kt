@@ -125,6 +125,30 @@ data class MeasurementSnapshot(
     val usable: Boolean = true,
 )
 
+enum class MeasurementInputSource {
+    HandMeasure,
+    ProductSize,
+    VisualEstimate,
+    Unknown,
+}
+
+data class TryOnMeasurementInput(
+    val equivalentDiameterMm: Float,
+    val fingerWidthMm: Float?,
+    val confidence: Float,
+    val source: MeasurementInputSource,
+)
+
+data class ProductTryOnAsset(
+    val productId: String,
+    val variantId: String?,
+    val sku: String,
+    val modelAssetUrl: String?,
+    val localAssetPath: String?,
+    val metadataUrl: String?,
+    val materialProfile: String?,
+)
+
 enum class TryOnTrackingState {
     Searching,
     Candidate,

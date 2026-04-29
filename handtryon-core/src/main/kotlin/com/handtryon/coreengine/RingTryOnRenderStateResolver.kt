@@ -5,6 +5,7 @@ import com.handtryon.coreengine.model.RingFingerPose
 import com.handtryon.coreengine.model.RingFitState
 import com.handtryon.coreengine.model.RingTransform3D
 import com.handtryon.coreengine.model.TryOnRenderPass
+import com.handtryon.coreengine.model.TryOnRenderQuality
 import com.handtryon.coreengine.model.TryOnInputQuality
 import com.handtryon.coreengine.model.TryOnRenderState3D
 import com.handtryon.coreengine.model.TryOnUpdateAction
@@ -70,6 +71,7 @@ class RingTryOnRenderStateResolver(
             ),
             quality = quality,
             renderPasses = renderPasses(fingerPose, quality, visualQa),
+            renderQuality = renderQuality(quality, visualQa),
             visualQa = visualQa,
         )
     }
@@ -123,6 +125,16 @@ class RingTryOnRenderStateResolver(
         a: Float,
         b: Float,
     ): Float = a + (b - a) * 0.5f
+
+    private fun renderQuality(
+        quality: TryOnInputQuality,
+        visualQa: TryOnVisualQaSnapshot,
+    ): TryOnRenderQuality =
+        when {
+            quality.updateAction == TryOnUpdateAction.Hide || !quality.landmarkUsable -> TryOnRenderQuality.Hidden
+            quality.qualityScore >= 0.66f && visualQa.passesBasicGate -> TryOnRenderQuality.Stable
+            else -> TryOnRenderQuality.Degraded
+        }
 
     private companion object {
         const val DEFAULT_VIEWPORT_WIDTH_AT_DEPTH_METERS = 0.32f

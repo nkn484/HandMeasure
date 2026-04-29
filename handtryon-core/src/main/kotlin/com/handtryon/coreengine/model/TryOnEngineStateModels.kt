@@ -3,6 +3,7 @@ package com.handtryon.coreengine.model
 data class TryOnEngineResult(
     val session: TryOnEngineSessionState,
     val renderState: TryOnEngineRenderState,
+    val renderState3D: TryOnRenderState3D? = null,
 )
 
 data class TryOnEngineSessionState(
@@ -26,7 +27,10 @@ data class TryOnEngineRenderState(
     val generatedAtMs: Long,
 )
 
-fun TryOnSession.toEngineResult(generatedAtMs: Long = updatedAtMs): TryOnEngineResult =
+fun TryOnSession.toEngineResult(
+    generatedAtMs: Long = updatedAtMs,
+    renderState3D: TryOnRenderState3D? = null,
+): TryOnEngineResult =
     TryOnEngineResult(
         session =
             TryOnEngineSessionState(
@@ -49,4 +53,5 @@ fun TryOnSession.toEngineResult(generatedAtMs: Long = updatedAtMs): TryOnEngineR
                 shouldRenderOverlay = quality.updateAction != TryOnUpdateAction.Hide,
                 generatedAtMs = generatedAtMs,
             ),
+        renderState3D = renderState3D,
     )

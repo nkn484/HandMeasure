@@ -117,6 +117,12 @@ enum class TryOnRenderPass {
     RingModel,
 }
 
+enum class TryOnRenderQuality {
+    Hidden,
+    Degraded,
+    Stable,
+}
+
 data class TryOnVisualQaSnapshot(
     val attachmentRatio: Float,
     val occluderRadiusToRingWidthRatio: Float,
@@ -136,5 +142,6 @@ data class TryOnRenderState3D(
     val fingerOccluder: FingerOccluderState?,
     val quality: TryOnInputQuality,
     val renderPasses: List<TryOnRenderPass> = emptyList(),
+    val renderQuality: TryOnRenderQuality = TryOnRenderQuality.Stable,
     val visualQa: TryOnVisualQaSnapshot? = null,
 )

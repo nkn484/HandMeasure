@@ -38,6 +38,8 @@ class TryOnEngineTest {
         assertThat(result.renderState.trackingState).isEqualTo(result.session.quality.trackingState)
         assertThat(result.renderState.qualityScore).isEqualTo(result.session.quality.qualityScore)
         assertThat(result.renderState.updateAction).isEqualTo(result.session.quality.updateAction)
+        assertThat(result.renderState3D).isNotNull()
+        assertThat(result.renderState3D?.quality?.trackingState).isEqualTo(result.session.quality.trackingState)
     }
 
     @Test
@@ -62,6 +64,7 @@ class TryOnEngineTest {
         assertThat(result.session.placement).isEqualTo(manualPlacement)
         assertThat(result.renderState.placement).isEqualTo(manualPlacement)
         assertThat(result.renderState.generatedAtMs).isEqualTo(9999L)
+        assertThat(result.renderState3D).isNull()
     }
 
     private fun ringPose(): TryOnHandPoseSnapshot {
