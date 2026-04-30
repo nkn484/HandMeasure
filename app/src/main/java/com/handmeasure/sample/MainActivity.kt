@@ -66,6 +66,7 @@ private fun DemoHostScreen(modifier: Modifier = Modifier) {
             TryOnDemoScreen(
                 onBack = { route = DemoRoute.Landing },
                 autoLaunchMeasureOnStart = false,
+                showDeveloperEntry = false,
                 modifier = modifier,
             )
         }
@@ -74,6 +75,7 @@ private fun DemoHostScreen(modifier: Modifier = Modifier) {
             TryOnDemoScreen(
                 onBack = { route = DemoRoute.Landing },
                 autoLaunchMeasureOnStart = true,
+                showDeveloperEntry = false,
                 modifier = modifier,
             )
         }

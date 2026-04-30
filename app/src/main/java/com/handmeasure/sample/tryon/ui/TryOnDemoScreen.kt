@@ -67,6 +67,7 @@ import com.handtryon.domain.TryOnMode
 import com.handtryon.domain.TryOnSession
 import com.handtryon.domain.TryOnTrackingState
 import com.handtryon.domain.TryOnUpdateAction
+import com.handtryon.nonar3d.NonAr3dTryOnScene
 import com.handtryon.realtime.TryOnRealtimeAnalyzer
 import com.handtryon.render.StableRingOverlayRenderer
 import com.handtryon.tracking.FrameSource
@@ -75,10 +76,22 @@ import com.handtryon.tracking.TargetFinger
 import com.handtryon.tracking.TrackedHandFrame
 import com.handtryon.tracking.TrackedHandFrameMapper
 import com.handtryon.ui.TryOnOverlay
+import com.handtryon.ui.product.ProductTryOnControls
+import com.handtryon.ui.product.ProductTryOnFitSource
+import com.handtryon.ui.product.ProductTryOnRendererMode
+import com.handtryon.ui.product.ProductTryOnState
+import com.handtryon.ui.product.ProductTryOnUiState
+import com.handtryon.ui.product.ProductTryOnStateResolver
 import com.handtryon.validation.RuntimeMetrics
 import com.handtryon.validation.RuntimeMetricsTracker
+import com.handtryon.validation.AssetValidationSeverity
+import com.handtryon.validation.GlbAssetValidationPolicy
+import com.handtryon.validation.TryOnSessionTelemetry
+import com.handtryon.validation.TryOnSessionTelemetryExporter
+import com.handtryon.validation.TryOnTelemetryRendererMode
 import java.io.File
 import java.io.FileOutputStream
+import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
@@ -89,6 +102,7 @@ import kotlin.math.roundToInt
 fun TryOnDemoScreen(
     onBack: (() -> Unit)? = null,
     autoLaunchMeasureOnStart: Boolean = false,
+    showDeveloperEntry: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -108,6 +122,7 @@ fun TryOnDemoScreen(
     val handPoseProvider = remember { MutableHandPoseProvider() }
     val measurementProvider = remember { MutableMeasurementProvider() }
     val arFrameExecutor = remember { Executors.newSingleThreadExecutor() }
+    val telemetryExecutor = remember { Executors.newSingleThreadExecutor() }
     val arFrameDetectionInFlight = remember { AtomicBoolean(false) }
     val arRuntimeMetricsTracker = remember { RuntimeMetricsTracker() }
     val handDetectionLock = remember { Any() }
@@ -126,8 +141,13 @@ fun TryOnDemoScreen(
     var arPreviewEnabled by rememberSaveable { mutableStateOf(false) }
     var hasSelectedPreviewMode by rememberSaveable { mutableStateOf(false) }
     var debugFingerOccluderVisible by rememberSaveable { mutableStateOf(false) }
+    var developerMode by rememberSaveable { mutableStateOf(false) }
     var rendererError by remember { mutableStateOf<String?>(null) }
     var hasTriggeredAutoMeasure by rememberSaveable { mutableStateOf(false) }
+    var selectedProductDiameterMm by rememberSaveable { mutableStateOf<Float?>(null) }
+    var selectedFitSource by rememberSaveable { mutableStateOf(ProductTryOnFitSource.VisualEstimate) }
+    val telemetrySessionId = remember { UUID.randomUUID().toString() }
+    val telemetryExporter = remember { TryOnSessionTelemetryExporter(File(context.filesDir, "tryon_telemetry")) }
 
     val baseAsset =
         remember {
@@ -141,8 +161,10 @@ fun TryOnDemoScreen(
             )
         }
     val ringAssetLoader = remember { RingAssetLoader(context.assets) }
+    val assetValidationPolicy = remember { GlbAssetValidationPolicy() }
     var arAvailability by remember { mutableStateOf(ArTryOnAvailability.from(context)) }
     val glbSummary = remember { runCatching { ringAssetLoader.loadGlbSummary(baseAsset) }.getOrNull() }
+    val assetValidationReport = remember(glbSummary) { assetValidationPolicy.validate(glbSummary) }
     val ringBitmap = remember { runCatching { ringAssetLoader.loadOverlayBitmap(baseAsset) }.getOrNull() }
     val metadata = remember { runCatching { ringAssetLoader.loadMetadata(baseAsset) }.getOrNull() }
     val activeAsset =
@@ -152,6 +174,8 @@ fun TryOnDemoScreen(
                 rotationBiasDeg = metadata?.rotationBiasDeg ?: 0f,
             )
         }
+    val glbUsable = !activeAsset.modelAssetPath.isNullOrBlank() && assetValidationReport.status != AssetValidationSeverity.Error
+    val effectiveModelAssetPath = if (glbUsable) activeAsset.modelAssetPath else null
 
     fun resolveSessionState(
         handPose: HandPoseSnapshot? = handPoseProvider.latestPose(),
@@ -166,7 +190,16 @@ fun TryOnDemoScreen(
             sessionResolver.resolveState(
                 asset = activeAsset,
                 handPose = handPose,
-                measurement = measurement,
+                measurement =
+                    when (selectedFitSource) {
+                        ProductTryOnFitSource.Measured -> measurement
+                        else -> null
+                    },
+                selectedDiameterMm =
+                    when (selectedFitSource) {
+                        ProductTryOnFitSource.SelectedSize -> selectedProductDiameterMm
+                        else -> null
+                    },
                 manualPlacement = manualPlacementOverride,
                 previousSession = previousSessionOverride,
                 frameWidth = frameWidth,
@@ -180,6 +213,7 @@ fun TryOnDemoScreen(
     fun applyMeasurementHandoff(handoff: TryOnDemoHandoff) {
         latestMeasurementHandoff = handoff
         measurementProvider.snapshot = handoff.snapshot
+        selectedFitSource = ProductTryOnFitSource.Measured
         val resolved = resolveSessionState(measurement = handoff.snapshot)
         manualPlacement = resolved.placement
         manualAdjustEnabled = true
@@ -197,14 +231,25 @@ fun TryOnDemoScreen(
     fun clearMeasurementHandoff() {
         latestMeasurementHandoff = null
         measurementProvider.snapshot = null
+        selectedFitSource = ProductTryOnFitSource.VisualEstimate
         manualAdjustEnabled = false
         session = resolveSessionState(measurement = null, manualPlacementOverride = null)
     }
 
-    val canUseArPreview = arAvailability.isUsableNow && !activeAsset.modelAssetPath.isNullOrBlank()
-    val enableLegacy2dTryOn = false
-    val isArPreviewActive = arPreviewEnabled && canUseArPreview
-    val isModel3dPreviewActive = isArPreviewActive
+    val canUseArPreview = arAvailability.isUsableNow && glbUsable
+    val allowLegacy2dOverlayFallback = ringBitmap != null
+    val rendererMode =
+        ProductTryOnStateResolver.resolveRendererMode(
+            canUseArCoreNow = canUseArPreview,
+            userWantsArCore = arPreviewEnabled,
+            hasGlbAsset = glbUsable,
+            allowLegacyOverlayFallback = allowLegacy2dOverlayFallback,
+        )
+    val isArPreviewActive = rendererMode == ProductTryOnRendererMode.ARCoreCamera3D
+    val isModel3dPreviewActive =
+        rendererMode == ProductTryOnRendererMode.ARCoreCamera3D ||
+            rendererMode == ProductTryOnRendererMode.CameraRelative3D ||
+            rendererMode == ProductTryOnRendererMode.Static3DPreview
 
     LaunchedEffect(canUseArPreview, hasSelectedPreviewMode) {
         when {
@@ -291,6 +336,12 @@ fun TryOnDemoScreen(
         }
     }
 
+    DisposableEffect(telemetryExecutor) {
+        onDispose {
+            telemetryExecutor.shutdownNow()
+        }
+    }
+
     DisposableEffect(lifecycleOwner, hasCameraPermission, handLandmarkEngine, activeAsset, isArPreviewActive) {
         if (!hasCameraPermission || isArPreviewActive) {
             onDispose { }
@@ -298,7 +349,7 @@ fun TryOnDemoScreen(
             val analyzer =
                 TryOnRealtimeAnalyzer(
                     minDetectionIntervalMs = 110L,
-                    onDetectionFrame = { frame, timestampMs ->
+                    onDetectionFrame = { frame, timestampMs, imageRotationDegrees ->
                         val detection = synchronized(handDetectionLock) { handLandmarkEngine.detect(frame) }
                             val pose = detection?.toPoseSnapshot(frame.width, frame.height, timestampMs)
                             val trackedFrame =
@@ -307,7 +358,7 @@ fun TryOnDemoScreen(
                                         pose = pose,
                                         source = FrameSource.CameraX,
                                         isFrontCamera = false,
-                                        rotationDegrees = previewView.display?.rotation.toDegrees(),
+                                        rotationDegrees = imageRotationDegrees,
                                     )
                                 } else {
                                     null
@@ -366,15 +417,35 @@ fun TryOnDemoScreen(
     val renderFrameWidth = frameWidth.takeIf { it > 0 } ?: DEMO_FALLBACK_FRAME_WIDTH
     val renderFrameHeight = frameHeight.takeIf { it > 0 } ?: DEMO_FALLBACK_FRAME_HEIGHT
     val currentRenderState3D = latestResolution?.renderState3D
+    val fitSource =
+        currentRenderState3D?.fitState?.source.toProductFitSource()
+            ?: selectedFitSource
+    val productUiState =
+        ProductTryOnStateResolver.resolveUiState(
+            hasCameraPermission = hasCameraPermission,
+            hasAssetValidationError = assetValidationReport.hasErrors,
+            rendererMode = rendererMode,
+            trackingState = currentSession?.quality?.trackingState,
+            updateAction = currentSession?.quality?.updateAction,
+            qualityScore = currentSession?.quality?.qualityScore ?: 0f,
+            measurementApplied = latestMeasurementHandoff != null,
+        )
+    val productState =
+        ProductTryOnState(
+            uiState = productUiState,
+            rendererMode = rendererMode,
+            fitSource = fitSource,
+            developerMode = developerMode,
+        )
     Box(
         modifier =
             modifier
                 .fillMaxSize()
                 .background(Color.Black),
     ) {
-        if (isArPreviewActive) {
-            ArTryOnScene(
-                modelAssetPath = activeAsset.modelAssetPath,
+        when (rendererMode) {
+            ProductTryOnRendererMode.ARCoreCamera3D -> ArTryOnScene(
+                modelAssetPath = effectiveModelAssetPath,
                 renderState3D = currentRenderState3D,
                 frameWidth = renderFrameWidth,
                 frameHeight = renderFrameHeight,
@@ -411,7 +482,7 @@ fun TryOnDemoScreen(
                                             pose = pose,
                                             source = FrameSource.ARCoreCpuImage,
                                             isFrontCamera = false,
-                                            rotationDegrees = 0,
+                                            rotationDegrees = previewView.display?.rotation.toDegrees(),
                                         )
                                     } else {
                                         null
@@ -452,8 +523,44 @@ fun TryOnDemoScreen(
                 },
                 modifier = Modifier.fillMaxSize(),
             )
-        } else {
-            AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+            ProductTryOnRendererMode.CameraRelative3D -> {
+                AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+                NonAr3dTryOnScene(
+                    modelAssetPath = effectiveModelAssetPath,
+                    renderState3D = currentRenderState3D,
+                    frameWidth = renderFrameWidth,
+                    frameHeight = renderFrameHeight,
+                    glbSummary = glbSummary,
+                    debugFingerOccluderVisible = debugFingerOccluderVisible && developerMode,
+                    modifier = Modifier.fillMaxSize(),
+                    onRendererError = { throwable ->
+                        rendererError = "Non-AR 3D: ${throwable.message ?: throwable::class.java.simpleName}"
+                    },
+                    onTelemetryUpdated = { metrics ->
+                        runtimeMetrics = metrics
+                    },
+                )
+            }
+            ProductTryOnRendererMode.Static3DPreview -> {
+                NonAr3dTryOnScene(
+                    modelAssetPath = effectiveModelAssetPath,
+                    renderState3D = currentRenderState3D,
+                    frameWidth = renderFrameWidth,
+                    frameHeight = renderFrameHeight,
+                    glbSummary = glbSummary,
+                    debugFingerOccluderVisible = false,
+                    modifier = Modifier.fillMaxSize(),
+                    onRendererError = { throwable ->
+                        rendererError = "Static 3D: ${throwable.message ?: throwable::class.java.simpleName}"
+                    },
+                    onTelemetryUpdated = { metrics ->
+                        runtimeMetrics = metrics
+                    },
+                )
+            }
+            ProductTryOnRendererMode.Legacy2DOverlay -> {
+                AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+            }
         }
         Column(
             modifier =
@@ -513,7 +620,7 @@ fun TryOnDemoScreen(
                 )
             }
         }
-        if (enableLegacy2dTryOn && !isModel3dPreviewActive) {
+        if (rendererMode == ProductTryOnRendererMode.Legacy2DOverlay && !isModel3dPreviewActive) {
             TryOnOverlay(
                 ringBitmap = ringBitmap,
                 frameWidth = frameWidth,
@@ -568,37 +675,58 @@ fun TryOnDemoScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = "Chế độ: ${currentSession?.mode.toModeLabel()}",
+                text = productState.uiState.userMessage(),
                 color = Color.White,
                 style = MaterialTheme.typography.titleMedium,
             )
-            Text(
-                text = runtimeMetrics.toRuntimeTelemetryText(),
-                color = Color(0xFFE0E0E0),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                text =
-                    when {
-                        isArPreviewActive -> "Renderer: ARCore 3D"
-                        else -> "Renderer: CameraX preview (AR inactive)"
-                    },
-                color = Color(0xFFE0E0E0),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            glbSummary.toReadableText()?.let { modelText ->
+            if (developerMode) {
                 Text(
-                    text = modelText,
+                    text = "Renderer: ${productState.rendererMode.name}",
                     color = Color(0xFFE0E0E0),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    text = runtimeMetrics.toRuntimeTelemetryText(latestTrackedHandFrame),
+                    color = Color(0xFFE0E0E0),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                glbSummary.toReadableText()?.let { modelText ->
+                    Text(
+                        text = modelText,
+                        color = Color(0xFFE0E0E0),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+            if (assetValidationReport.status == AssetValidationSeverity.Error) {
+                Text(
+                    text = "Asset unavailable. GLB render disabled.",
+                    color = Color(0xFFFF8A80),
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
             Text(
                 text =
                     latestMeasurementHandoff?.summary
-                        ?: "Handoff: chưa có. Hãy dùng Đo tay hoặc Dùng handoff mẫu để hoàn tất luồng demo.",
+                        ?: "No handoff yet. Use Measure or a fit source.",
                 color = Color(0xFFB2FF59),
                 style = MaterialTheme.typography.bodySmall,
+            )
+            ProductTryOnControls(
+                fitSource = fitSource,
+                onSelectMeasuredFit = {
+                    selectedFitSource = ProductTryOnFitSource.Measured
+                    session = resolveSessionState()
+                },
+                onSelectSelectedSizeFit = {
+                    selectedFitSource = ProductTryOnFitSource.SelectedSize
+                    if (selectedProductDiameterMm == null) selectedProductDiameterMm = 18.0f
+                    session = resolveSessionState()
+                },
+                onSelectVisualEstimateFit = {
+                    selectedFitSource = ProductTryOnFitSource.VisualEstimate
+                    session = resolveSessionState()
+                },
             )
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
@@ -610,7 +738,7 @@ fun TryOnDemoScreen(
                     modifier = Modifier.weight(1f),
                     enabled = canUseArPreview,
                 ) {
-                    Text(if (isArPreviewActive) "Tat AR" else "Bat AR")
+                    Text(if (isArPreviewActive) "Disable AR" else "Enable AR")
                 }
                 Text(
                     text =
@@ -624,20 +752,66 @@ fun TryOnDemoScreen(
                     modifier = Modifier.weight(1f),
                 )
             }
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = { debugFingerOccluderVisible = !debugFingerOccluderVisible },
-                    modifier = Modifier.weight(1f),
-                    enabled = isModel3dPreviewActive,
-                ) {
-                    Text(if (debugFingerOccluderVisible) "Ẩn occluder debug" else "Hiện occluder debug")
+            if (showDeveloperEntry) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { developerMode = !developerMode },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(if (developerMode) "Hide debug" else "Developer mode")
+                    }
                 }
-                Text(
-                    text = "Occluder Phase A: ${if (debugFingerOccluderVisible) "debug mesh" else "depth-only"}",
-                    color = Color(0xFFE0E0E0),
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.weight(1f),
-                )
+            }
+            if (developerMode) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            val tracked = latestTrackedHandFrame
+                            val metrics = runtimeMetrics
+                            val currentFitSource = currentRenderState3D?.fitState?.source?.name ?: fitSource.name
+                            telemetryExecutor.execute {
+                                val file =
+                                    telemetryExporter.export(
+                                        TryOnSessionTelemetry(
+                                            sessionId = telemetrySessionId,
+                                            rendererMode = rendererMode.toTelemetryRendererMode(),
+                                            frameSource = tracked?.source?.name ?: "Unknown",
+                                            rotationDegrees = tracked?.rotationDegrees ?: 0,
+                                            mirrored = tracked?.isMirrored ?: false,
+                                            handedness = tracked?.handedness?.name ?: "Unknown",
+                                            trackingFps = metrics.toDetectionFps(),
+                                            detectorLatencyMs = (metrics?.detectorLatencyMs ?: 0.0).toFloat(),
+                                            renderUpdateRate = (metrics?.renderStateUpdateHz ?: 0.0).toFloat(),
+                                            qualityAction = currentSession?.quality?.updateAction?.name ?: "Unknown",
+                                            fitSource = currentFitSource,
+                                            assetValidationStatus = assetValidationReport.status.name,
+                                        ),
+                                    )
+                                ContextCompat.getMainExecutor(context).execute {
+                                    Toast.makeText(context, "Telemetry exported: ${file.name}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Export telemetry")
+                    }
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { debugFingerOccluderVisible = !debugFingerOccluderVisible },
+                        modifier = Modifier.weight(1f),
+                        enabled = isModel3dPreviewActive,
+                    ) {
+                        Text(if (debugFingerOccluderVisible) "Hide occluder debug" else "Show occluder debug")
+                    }
+                    Text(
+                        text = "Occluder Phase A: ${if (debugFingerOccluderVisible) "debug mesh" else "depth-only"}",
+                        color = Color(0xFFE0E0E0),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
@@ -646,9 +820,9 @@ fun TryOnDemoScreen(
                         session = resolveSessionState(manualPlacementOverride = null)
                     },
                     modifier = Modifier.weight(1f),
-                    enabled = ringBitmap != null && !isArPreviewActive,
+                    enabled = hasCameraPermission && rendererMode != ProductTryOnRendererMode.Static3DPreview,
                 ) {
-                    Text("Nhận diện tay")
+                    Text("Auto track")
                 }
                 Button(
                     onClick = {
@@ -674,9 +848,13 @@ fun TryOnDemoScreen(
                             )
                     },
                     modifier = Modifier.weight(1f),
-                    enabled = ringBitmap != null && enableLegacy2dTryOn && !isModel3dPreviewActive,
+                    enabled =
+                        developerMode &&
+                            ringBitmap != null &&
+                            rendererMode == ProductTryOnRendererMode.Legacy2DOverlay &&
+                            !isModel3dPreviewActive,
                 ) {
-                    Text("Chỉnh tay")
+                    Text("Manual adjust")
                 }
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -686,7 +864,7 @@ fun TryOnDemoScreen(
                     },
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text("Đo tay")
+                    Text("Measure hand")
                 }
                 Button(
                     onClick = {
@@ -694,7 +872,7 @@ fun TryOnDemoScreen(
                     },
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text("Dùng handoff mẫu")
+                    Text("Use sample handoff")
                 }
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -728,10 +906,11 @@ fun TryOnDemoScreen(
                     },
                     modifier = Modifier.weight(1f),
                     enabled =
+                        developerMode &&
                         ringBitmap != null &&
                             latestFrame != null &&
                             currentSession != null &&
-                            enableLegacy2dTryOn &&
+                            rendererMode == ProductTryOnRendererMode.Legacy2DOverlay &&
                             !isModel3dPreviewActive,
                 ) {
                     Text("Xuất ảnh")
@@ -793,7 +972,21 @@ private class MutableMeasurementProvider : OptionalMeasurementProvider {
     override fun latestMeasurement(): MeasurementSnapshot? = snapshot
 }
 
-private fun RuntimeMetrics?.toRuntimeTelemetryText(): String {
+private fun ProductTryOnUiState.userMessage(): String =
+    when (this) {
+        ProductTryOnUiState.PreparingCamera -> "Preparing camera..."
+        ProductTryOnUiState.SearchingHand -> "Searching for hand..."
+        ProductTryOnUiState.PlaceHandInFrame -> "Place your ring finger inside frame."
+        ProductTryOnUiState.Tracking -> "Tracking ring placement."
+        ProductTryOnUiState.HoldStill -> "Hold still for stable try-on."
+        ProductTryOnUiState.LowConfidence -> "Low confidence. Reposition hand."
+        ProductTryOnUiState.MeasurementApplied -> "Measured fit applied."
+        ProductTryOnUiState.Fallback3D -> "Using fallback 3D preview."
+        ProductTryOnUiState.UnsupportedDevice -> "This device is not supported."
+        ProductTryOnUiState.AssetUnavailable -> "Ring asset unavailable."
+    }
+
+private fun RuntimeMetrics?.toRuntimeTelemetryText(frame: TrackedHandFrame?): String {
     val metrics = this ?: return "Realtime: waiting..."
     val updateHz =
         if (metrics.avgUpdateIntervalMs <= 0.0) {
@@ -803,7 +996,11 @@ private fun RuntimeMetrics?.toRuntimeTelemetryText(): String {
         }
     val renderHz = metrics.renderStateUpdateHz.roundToInt()
     val rendererError = metrics.rendererErrorStage?.let { stage -> ", rendererError=$stage" }.orEmpty()
-    return "Realtime detector=${"%.1f".format(metrics.detectorLatencyMs)} ms, update=${updateHz} Hz, renderState=${renderHz} Hz, nodeRecreate=${metrics.nodeRecreateCount}$rendererError, memory=${metrics.approxMemoryDeltaKb} KB"
+    val frameInfo =
+        frame?.let {
+            ", source=${it.source.name}, rot=${it.rotationDegrees}, mirror=${it.isMirrored}, hand=${it.handedness.name}"
+        }.orEmpty()
+    return "Realtime detector=${"%.1f".format(metrics.detectorLatencyMs)} ms, update=${updateHz} Hz, renderState=${renderHz} Hz, nodeRecreate=${metrics.nodeRecreateCount}$rendererError, memory=${metrics.approxMemoryDeltaKb} KB$frameInfo"
 }
 
 private fun RuntimeMetrics?.toRuntimeText(): String {
@@ -903,14 +1100,6 @@ private fun saveRenderedBitmap(
     return file
 }
 
-private fun TryOnMode?.toModeLabel(): String =
-    when (this) {
-        TryOnMode.Measured -> "Đã đo"
-        TryOnMode.LandmarkOnly -> "Theo landmark"
-        TryOnMode.Manual -> "Thủ công"
-        null -> "Thủ công"
-    }
-
 private fun ArTryOnAvailability.toUserReadableText(): String =
     when (status) {
         ArTryOnAvailabilityStatus.SupportedNeedsInstall ->
@@ -922,6 +1111,29 @@ private fun ArTryOnAvailability.toUserReadableText(): String =
         ArTryOnAvailabilityStatus.SupportedInstalled ->
             "ARCore ready"
     }
+
+private fun com.handtryon.coreengine.model.RingFitSource?.toProductFitSource(): ProductTryOnFitSource? =
+    when (this) {
+        com.handtryon.coreengine.model.RingFitSource.Measured -> ProductTryOnFitSource.Measured
+        com.handtryon.coreengine.model.RingFitSource.SelectedSize -> ProductTryOnFitSource.SelectedSize
+        com.handtryon.coreengine.model.RingFitSource.VisualEstimate -> ProductTryOnFitSource.VisualEstimate
+        com.handtryon.coreengine.model.RingFitSource.AssetDefault -> ProductTryOnFitSource.Default
+        null -> null
+    }
+
+private fun ProductTryOnRendererMode.toTelemetryRendererMode(): TryOnTelemetryRendererMode =
+    when (this) {
+        ProductTryOnRendererMode.ARCoreCamera3D -> TryOnTelemetryRendererMode.ARCoreCamera3D
+        ProductTryOnRendererMode.CameraRelative3D -> TryOnTelemetryRendererMode.CameraRelative3D
+        ProductTryOnRendererMode.Static3DPreview -> TryOnTelemetryRendererMode.Static3DPreview
+        ProductTryOnRendererMode.Legacy2DOverlay -> TryOnTelemetryRendererMode.Legacy2DOverlay
+    }
+
+private fun RuntimeMetrics?.toDetectionFps(): Float {
+    val metrics = this ?: return 0f
+    if (metrics.avgUpdateIntervalMs <= 0.0) return 0f
+    return (1000.0 / metrics.avgUpdateIntervalMs).toFloat()
+}
 
 private const val DEMO_FALLBACK_FRAME_WIDTH = 1080
 private const val DEMO_FALLBACK_FRAME_HEIGHT = 1920

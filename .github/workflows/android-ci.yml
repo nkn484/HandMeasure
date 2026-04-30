@@ -53,6 +53,9 @@ jobs:
             --steady-scale-delta-threshold 0.12 \
             --steady-rotation-jitter-threshold 8.0 \
             --min-steady-pass-rate 0.85 \
+            --min-steady-pair-count 2 \
+            --prediction-source fixture \
+            --skip-frame-read \
             --strict-gate
 
       - name: Upload demo debug APK

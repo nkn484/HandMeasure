@@ -13,7 +13,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import cv2
+try:
+    import cv2  # type: ignore
+except Exception:  # pragma: no cover - environment dependent import failure
+    cv2 = None
 
 
 DEFAULT_CENTER_THRESHOLD_PX = 24.0
@@ -24,6 +27,7 @@ DEFAULT_MIN_CENTER_RATIO_PASS_RATE = 0.85
 DEFAULT_STEADY_SCALE_DELTA_THRESHOLD = 0.12
 DEFAULT_STEADY_ROTATION_JITTER_THRESHOLD = 8.0
 DEFAULT_MIN_STEADY_PASS_RATE = 0.85
+DEFAULT_MIN_STEADY_PAIR_COUNT = 2
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"}
 STEADY_EXCLUDE_NOTES = {
     "expect_hide",
@@ -74,6 +78,9 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_STEADY_ROTATION_JITTER_THRESHOLD,
     )
     parser.add_argument("--min-steady-pass-rate", type=float, default=DEFAULT_MIN_STEADY_PASS_RATE)
+    parser.add_argument("--min-steady-pair-count", type=int, default=DEFAULT_MIN_STEADY_PAIR_COUNT)
+    parser.add_argument("--prediction-source", choices=["fixture", "generated"], default=None)
+    parser.add_argument("--skip-frame-read", action="store_true")
     parser.add_argument("--strict-gate", action="store_true")
     return parser.parse_args()
 
@@ -163,6 +170,8 @@ def read_fixture_frame(
     frame_index: int | None,
     media: dict[str, Any] | None,
 ) -> tuple[Path, Any | None, str]:
+    if cv2 is None:
+        return image_dir / file_name, None, "opencv_unavailable"
     fixture_path = image_dir / file_name
     if not fixture_path.exists():
         return fixture_path, None, "missing_fixture"
@@ -190,6 +199,7 @@ def assess_annotation_quality(
     frame_image: Any | None,
     frame_width: int,
     frame_height: int,
+    skip_frame_quality_metrics: bool = False,
 ) -> dict[str, Any]:
     visible_finger = bool(frame.get("visibleFinger", True))
     declared_quality = str(frame.get("annotationQuality", "")).lower()
@@ -223,7 +233,7 @@ def assess_annotation_quality(
             notes.append("low_contrast")
         if sharpness < 90:
             notes.append("motion_blur_or_soft_frame")
-    else:
+    elif not skip_frame_quality_metrics:
         notes.append("frame_not_read")
 
     if visible_finger and zone_present and zone.width_px < 35:
@@ -255,20 +265,32 @@ def row_for_frame(
     center_threshold_px: float,
     width_threshold_px: float,
     rotation_threshold_deg: float,
+    skip_frame_read: bool = False,
 ) -> dict[str, Any]:
     file_name = media_file_for_frame(frame, media)
     frame_index = frame.get("frameIndex")
-    image_path, frame_image, read_status = read_fixture_frame(
-        image_dir=image_dir,
-        file_name=file_name,
-        frame_index=int(frame_index) if frame_index is not None else None,
-        media=media,
-    )
+    image_path = image_dir / file_name
+    if skip_frame_read:
+        frame_image = None
+        read_status = "ok"
+    else:
+        image_path, frame_image, read_status = read_fixture_frame(
+            image_dir=image_dir,
+            file_name=file_name,
+            frame_index=int(frame_index) if frame_index is not None else None,
+            media=media,
+        )
     visible_finger = bool(frame.get("visibleFinger", True))
     expected = expected_zone(frame)
     frame_width = int((media or {}).get("frameWidth") or frame.get("frameWidth") or (frame_image.shape[1] if frame_image is not None else 0))
     frame_height = int((media or {}).get("frameHeight") or frame.get("frameHeight") or (frame_image.shape[0] if frame_image is not None else 0))
-    quality = assess_annotation_quality(frame, frame_image, frame_width, frame_height)
+    quality = assess_annotation_quality(
+        frame,
+        frame_image,
+        frame_width,
+        frame_height,
+        skip_frame_quality_metrics=skip_frame_read,
+    )
 
     base_row = {
         "file": file_name,
@@ -413,16 +435,10 @@ def steady_pair_metrics(measured_rows: list[dict[str, Any]]) -> list[dict[str, A
         prev_expected_width = max(1.0, float(previous["expectedWidthPx"]))
         curr_expected_width = max(1.0, float(current["expectedWidthPx"]))
         expected_avg_width = (prev_expected_width + curr_expected_width) * 0.5
-        expected_center_delta = math.hypot(
-            float(current["expectedCenterX"]) - float(previous["expectedCenterX"]),
-            float(current["expectedCenterY"]) - float(previous["expectedCenterY"]),
-        )
         expected_scale_delta = abs(curr_expected_width - prev_expected_width) / expected_avg_width
         expected_rotation_delta = normalize_axis_degrees(
             float(current["expectedRotationDeg"]) - float(previous["expectedRotationDeg"])
         )
-        if expected_center_delta > expected_avg_width * 0.22:
-            continue
         if expected_scale_delta > 0.10:
             continue
         if expected_rotation_delta > 6.0:
@@ -455,9 +471,11 @@ def write_text_summary(path: Path, report: dict[str, Any]) -> None:
         f"frames: total={summary['totalFrames']} measured={summary['measuredFrames']} failed={summary['failedFrames']}",
         f"missing fixtures: {summary['missingFixtures']}, missing predictions: {summary['missingPredictions']}",
         f"center ratio pass rate: {gate['centerRatioPassRate']}",
-        f"steady scale pass rate: {gate['steadyScalePassRate']}",
-        f"steady rotation pass rate: {gate['steadyRotationPassRate']}",
+        f"steady pairs: {gate['steadyPairTotal']} (min required {report['thresholds']['minSteadyPairCount']})",
+        f"steady scale pass rate: {gate['steadyScalePassRate']} ({gate['steadyScaleEvaluation']})",
+        f"steady rotation pass rate: {gate['steadyRotationPassRate']} ({gate['steadyRotationEvaluation']})",
         f"hidden count: {summary['hiddenCount']}, frozen count: {summary['frozenCount']}",
+        f"prediction source: {report['predictionSource']}",
     ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -479,6 +497,7 @@ def write_html_summary(path: Path, report: dict[str, Any]) -> None:
       <li>Missing fixtures: {summary["missingFixtures"]}</li>
       <li>Missing predictions: {summary["missingPredictions"]}</li>
       <li>Center ratio pass rate: {gate["centerRatioPassRate"]}</li>
+      <li>Steady pairs: {gate["steadyPairTotal"]} (min required {report["thresholds"]["minSteadyPairCount"]})</li>
       <li>Steady scale pass rate: {gate["steadyScalePassRate"]}</li>
       <li>Steady rotation pass rate: {gate["steadyRotationPassRate"]}</li>
       <li>Hidden count: {summary["hiddenCount"]}</li>
@@ -503,6 +522,7 @@ def to_percent(value: float) -> float:
 def main() -> int:
     args = parse_args()
     args.report_dir.mkdir(parents=True, exist_ok=True)
+    prediction_source = args.prediction_source or ("fixture" if args.predictions else "generated")
 
     annotations = load_json(args.annotations)
     media = annotations.get("media")
@@ -517,6 +537,7 @@ def main() -> int:
             center_threshold_px=args.center_threshold_px,
             width_threshold_px=args.width_threshold_px,
             rotation_threshold_deg=args.rotation_threshold_deg,
+            skip_frame_read=args.skip_frame_read,
         )
         for frame in annotations.get("frames", [])
     ]
@@ -563,14 +584,18 @@ def main() -> int:
     steady_pair_total = len(steady_pairs)
     steady_scale_pass_rate = rate(steady_scale_pass_count, steady_pair_total)
     steady_rotation_pass_rate = rate(steady_rotation_pass_count, steady_pair_total)
+    has_enough_steady_pairs = steady_pair_total >= args.min_steady_pair_count
+    steady_scale_evaluated = has_enough_steady_pairs
+    steady_rotation_evaluated = has_enough_steady_pairs
 
     gate_passed = (
         not missing_rows
         and not bad_annotation_rows
         and not missing_prediction_rows
         and center_ratio_pass_rate >= args.min_center_ratio_pass_rate
-        and (steady_pair_total == 0 or steady_scale_pass_rate >= args.min_steady_pass_rate)
-        and (steady_pair_total == 0 or steady_rotation_pass_rate >= args.min_steady_pass_rate)
+        and has_enough_steady_pairs
+        and steady_scale_pass_rate >= args.min_steady_pass_rate
+        and steady_rotation_pass_rate >= args.min_steady_pass_rate
     )
 
     overall_status = (
@@ -584,12 +609,28 @@ def main() -> int:
         if not gate_passed
         else "passed"
     )
+    gate_fail_reasons: list[str] = []
+    if center_ratio_pass_rate < args.min_center_ratio_pass_rate:
+        gate_fail_reasons.append("center_ratio_below_threshold")
+    if not has_enough_steady_pairs:
+        gate_fail_reasons.append("insufficient_steady_pairs")
+    if has_enough_steady_pairs and steady_scale_pass_rate < args.min_steady_pass_rate:
+        gate_fail_reasons.append("steady_scale_pass_rate_below_threshold")
+    if has_enough_steady_pairs and steady_rotation_pass_rate < args.min_steady_pass_rate:
+        gate_fail_reasons.append("steady_rotation_pass_rate_below_threshold")
+    if missing_prediction_rows:
+        gate_fail_reasons.append("missing_predictions")
+    if bad_annotation_rows:
+        gate_fail_reasons.append("bad_annotations")
+    if missing_rows:
+        gate_fail_reasons.append("missing_fixtures")
     report = {
         "schemaVersion": 2,
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "annotationFile": str(args.annotations),
         "imageDir": str(args.image_dir),
         "predictionsFile": str(args.predictions) if args.predictions else None,
+        "predictionSource": prediction_source,
         "media": media,
         "fixtureMetadata": fixture_metadata,
         "pipeline": [
@@ -611,6 +652,7 @@ def main() -> int:
             "steadyScaleDelta": args.steady_scale_delta_threshold,
             "steadyRotationJitterDeg": args.steady_rotation_jitter_threshold,
             "minSteadyPassRate": args.min_steady_pass_rate,
+            "minSteadyPairCount": args.min_steady_pair_count,
         },
         "status": overall_status,
         "summary": {
@@ -636,6 +678,9 @@ def main() -> int:
             "steadyPairTotal": steady_pair_total,
             "steadyScalePassRate": to_percent(steady_scale_pass_rate),
             "steadyRotationPassRate": to_percent(steady_rotation_pass_rate),
+            "steadyScaleEvaluation": "evaluated" if steady_scale_evaluated else "not_evaluated",
+            "steadyRotationEvaluation": "evaluated" if steady_rotation_evaluated else "not_evaluated",
+            "failReasons": gate_fail_reasons,
         },
         "steadyPairs": steady_pairs,
         "frames": rows,

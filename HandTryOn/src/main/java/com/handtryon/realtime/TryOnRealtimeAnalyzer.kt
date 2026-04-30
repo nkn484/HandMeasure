@@ -10,7 +10,7 @@ import com.handtryon.validation.RuntimeMetricsTracker
 class TryOnRealtimeAnalyzer(
     private val minDetectionIntervalMs: Long = 110L,
     private val converter: RgbaFrameBitmapConverter = RgbaFrameBitmapConverter(),
-    private val onDetectionFrame: (Bitmap, Long) -> Unit,
+    private val onDetectionFrame: (Bitmap, Long, Int) -> Unit,
     private val onMetricsUpdated: (RuntimeMetrics) -> Unit = {},
 ) : ImageAnalysis.Analyzer {
     private val metrics = RuntimeMetricsTracker()
@@ -24,7 +24,7 @@ class TryOnRealtimeAnalyzer(
             val now = SystemClock.elapsedRealtime()
             if (now - lastDetectionTs < minDetectionIntervalMs) return
             lastDetectionTs = now
-            onDetectionFrame(bitmap, now)
+            onDetectionFrame(bitmap, now, image.imageInfo.rotationDegrees)
             metrics.onDetectionUpdate(durationNs = SystemClock.elapsedRealtimeNanos() - startNs, timestampMs = now)
             if (metrics.snapshot().detectionUpdates % 10L == 0L) {
                 onMetricsUpdated(metrics.snapshot())

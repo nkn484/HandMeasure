@@ -135,6 +135,13 @@ class RingAssetLoader(
         val materialPolicy = GlbMaterialRenderPolicy().evaluate(materials)
         notes += "material_profile_${materialPolicy.materialProfile}"
         notes += materialPolicy.warnings.map { warning -> "material_warning_$warning" }
+        root.optJSONArray("extensionsRequired")?.let { required ->
+            for (index in 0 until required.length()) {
+                required.optString(index)?.takeIf { it.isNotBlank() }?.let { extension ->
+                    notes += "required_extension:$extension"
+                }
+            }
+        }
 
         return GlbAssetSummary(
             modelAssetPath = modelPath,
@@ -149,6 +156,7 @@ class RingAssetLoader(
             scale = scale,
             materials = materials,
             notes = notes,
+            fileSizeBytes = bytes.size.toLong(),
         )
     }
 

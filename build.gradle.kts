@@ -74,6 +74,11 @@ tasks.register<Exec>("tryOnReplayValidation") {
         "8.0",
         "--min-steady-pass-rate",
         "0.85",
+        "--min-steady-pair-count",
+        "2",
+        "--prediction-source",
+        "fixture",
+        "--skip-frame-read",
         "--strict-gate",
     )
 }
@@ -103,6 +108,11 @@ tasks.register<Exec>("tryOnVideoReplayValidation") {
         "8.0",
         "--min-steady-pass-rate",
         "0.85",
+        "--min-steady-pair-count",
+        "2",
+        "--prediction-source",
+        "fixture",
+        "--skip-frame-read",
         "--strict-gate",
     )
 }

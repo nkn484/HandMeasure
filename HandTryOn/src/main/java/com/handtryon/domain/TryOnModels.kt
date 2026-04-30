@@ -84,6 +84,7 @@ data class GlbAssetSummary(
     val scale: GlbScaleMetadata = GlbScaleMetadata(),
     val materials: List<GlbMaterialMetadata> = emptyList(),
     val notes: List<String> = emptyList(),
+    val fileSizeBytes: Long = 0L,
 ) {
     val effectiveModelWidthMm: Float?
         get() =

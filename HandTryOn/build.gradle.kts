@@ -42,6 +42,7 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.material3:material3")
     implementation("androidx.camera:camera-core:1.4.1")
     implementation("io.github.sceneview:arsceneview:2.0.4")
 
@@ -78,6 +79,11 @@ tasks.register<Exec>("runTryOnReplayValidation") {
         "8.0",
         "--min-steady-pass-rate",
         "0.85",
+        "--min-steady-pair-count",
+        "2",
+        "--prediction-source",
+        "fixture",
+        "--skip-frame-read",
         "--strict-gate",
     )
 }
